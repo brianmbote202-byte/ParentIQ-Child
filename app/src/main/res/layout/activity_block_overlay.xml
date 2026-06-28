@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#CC000000">
+
+    ```
+    <!-- Dark Scrim -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#AA000000" />
+
+    <!-- Premium Card -->
+    <LinearLayout
+        android:id="@+id/blockCard"
+        android:layout_width="340dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="28dp"
+        android:background="@drawable/bg_overlay_premium"
+        android:elevation="20dp">
+
+        <!-- Animated Lock -->
+        <ImageView
+            android:id="@+id/imgLock"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:layout_marginBottom="14dp"
+            android:src="@drawable/ic_lock"
+            android:tint="#00E5FF" />
+
+        <!-- Main Title -->
+        <TextView
+            android:id="@+id/txtTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Website Blocked"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <!-- Subtitle -->
+        <TextView
+            android:id="@+id/txtSubtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="18dp"
+            android:gravity="center"
+            android:text="This website has been restricted by parental controls"
+            android:textColor="#B0BEC5"
+            android:textSize="14sp" />
+
+        <!-- Domain Chip -->
+        <TextView
+            android:id="@+id/txtBlockedDomain"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="220dp"
+            android:gravity="center"
+            android:background="@drawable/bg_domain_chip"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:text="example.com"
+            android:textColor="#00E5FF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <!-- Reason -->
+        <TextView
+            android:id="@+id/txtBlockedReason"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:text="Blocked by parent"
+            android:textColor="#CFD8DC"
+            android:textSize="15sp" />
+
+        <!-- Time -->
+        <TextView
+            android:id="@+id/txtTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Blocked at 10:42 PM"
+            android:textColor="#90CAF9"
+            android:textSize="13sp" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="18dp"
+            android:background="#22FFFFFF" />
+
+        <!-- Warning -->
+        <TextView
+            android:id="@+id/txtWarning"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Access to this content is currently unavailable."
+            android:textColor="#90A4AE"
+            android:textSize="13sp" />
+
+        <!-- Security Status -->
+        <TextView
+            android:id="@+id/txtStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Protected by Family Safety"
+            android:textColor="#00E5FF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- Close Button -->
+        <Button
+            android:id="@+id/btnClose"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="24dp"
+            android:text="Close"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/bg_neon_button" />
+
+    </LinearLayout>
+    ```
+
+</FrameLayout>

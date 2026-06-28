@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">ParentIQ Child</string>
+    <string name="accessibility_desc">Website blocking accessibility service and
+        Monitors browsing activity to protect the child</string>
+    <string name="permission_icon">Permission Icon</string>
+    <string name="accessibility_description">
+    Accessibility service used for parental control and website monitoring.
+</string>
+
+
+
+</resources>

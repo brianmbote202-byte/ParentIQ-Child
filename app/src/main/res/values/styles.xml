@@ -1,0 +1,66 @@
+<resources>
+
+    <!-- MAIN APP THEME -->
+    <style name="Theme.ChildApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+
+        <!-- PRIMARY COLORS -->
+        <item name="colorPrimary">@color/gold_primary</item>
+        <item name="colorPrimaryVariant">@color/premium_dark</item>
+        <item name="colorOnPrimary">@android:color/black</item>
+
+        <!-- SECONDARY -->
+        <item name="colorSecondary">@color/gold_light</item>
+        <item name="colorSecondaryVariant">@color/gold_dark</item>
+        <item name="colorOnSecondary">@android:color/black</item>
+
+        <!-- SYSTEM BARS -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/premium_dark</item>
+
+        <!-- APP BACKGROUND -->
+        <item name="android:windowBackground">@color/premium_dark</item>
+
+        <!-- REMOVE ACTION BAR -->
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+
+    </style>
+
+    <!-- APP BLOCK OVERLAY -->
+    <style name="Theme.AppBlockOverlay"
+        parent="Theme.MaterialComponents.DayNight.NoActionBar">
+
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+
+        <item name="android:windowBackground">@color/premium_dark</item>
+
+        <item name="android:windowNoTitle">true</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+
+        <item name="android:windowTranslucentStatus">true</item>
+
+    </style>
+
+    <!-- FULLSCREEN -->
+    <style name="Theme.App.Fullscreen"
+        parent="Theme.MaterialComponents.DayNight.NoActionBar">
+
+        <item name="android:windowFullscreen">true</item>
+
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+
+        <item name="android:navigationBarColor">@color/premium_dark</item>
+
+        <item name="android:windowTranslucentStatus">true</item>
+
+        <item name="android:windowTranslucentNavigation">true</item>
+
+        <item name="android:fitsSystemWindows">false</item>
+
+    </style>
+
+</resources>

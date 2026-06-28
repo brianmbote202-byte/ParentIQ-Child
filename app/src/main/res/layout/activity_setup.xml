@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+
+    android:fillViewport="true"
+    android:background="@drawable/bg_gradient_dark">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+
+        android:orientation="vertical"
+        android:paddingBottom="24dp">
+
+
+        <!-- Header -->
+        <include
+            layout="@layout/setup_header_card"/>
+
+
+        <!-- Current Step -->
+        <include
+            layout="@layout/setup_current_step_card"/>
+
+
+        <!-- Main Action Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnEnableSocialMonitoring"
+
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="16dp"
+
+            android:text="Continue Setup"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="16sp"
+
+            app:cornerRadius="30dp"/>
+
+
+
+        <!-- Accessibility Help -->
+        <com.google.android.material.button.MaterialButton
+
+            android:id="@+id/btnAccessibilityHelp"
+
+            style="@style/Widget.Material3.Button.TextButton"
+
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+
+            android:layout_gravity="center"
+
+            android:text="How to Enable Accessibility"
+
+            android:visibility="gone"/>
+
+
+
+        <!-- Notification Help -->
+        <com.google.android.material.button.MaterialButton
+
+            android:id="@+id/btnNotificationHelp"
+
+            style="@style/Widget.Material3.Button.TextButton"
+
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+
+            android:layout_gravity="center"
+
+            android:text="Can't enable Notification Access?"
+
+            android:visibility="gone"/>
+
+
+
+
+        <!-- Timeline -->
+
+        <include
+            layout="@layout/setup_timeline_card"/>
+
+
+
+        <!-- Checklist -->
+
+        <include
+            layout="@layout/setup_security_card"/>
+
+
+
+    </LinearLayout>
+
+</ScrollView>

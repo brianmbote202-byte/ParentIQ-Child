@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@drawable/bg_gradient_dark">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="24dp">
+
+        <!-- HERO SECTION -->
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="430dp">
+
+            <ImageView
+                android:id="@+id/imgFamilyHero"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:src="@drawable/family_hero"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#401A1200"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="bottom"
+                android:padding="24dp">
+
+                <TextView
+                    android:text="Welcome!"
+                    android:textColor="@color/gold_primary"
+                    android:textStyle="bold"
+                    android:textSize="20sp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+
+                <TextView
+                    android:text="Protect What\nMatters Most"
+                    android:textColor="@android:color/white"
+                    android:textSize="34sp"
+                    android:lineSpacingExtra="4dp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="8dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+
+                <TextView
+                    android:text="Monitor. Protect. Empower."
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="16sp"
+                    android:layout_marginTop="12dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:text="SUPER PREMIUM"
+                    android:textColor="@android:color/black"
+                    android:textStyle="bold"
+                    android:paddingHorizontal="24dp"
+                    android:layout_marginTop="20dp"
+                    android:backgroundTint="@color/gold_primary"
+                    app:cornerRadius="28dp"
+                    app:elevation="8dp"/>
+
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <!-- STATUS CARD -->
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            app:cardCornerRadius="28dp"
+            android:backgroundTint="#101A3A">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="24dp"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/statusText"
+                        android:text="Waiting to start tracking..."
+                        android:textColor="@android:color/white"
+                        android:textStyle="bold"
+                        android:textSize="28sp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+
+                    <TextView
+                        android:text="Tracking begins when permissions are granted"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="14sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+
+                </LinearLayout>
+
+
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- RULE STATUS -->
+
+        <include
+            layout="@layout/layout_features_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
+        <!-- PREMIUM CARD -->
+
+        <TextView
+            android:id="@+id/debugText"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"/>
+
+        <TextView
+            android:id="@+id/instructionBanner"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"/>
+
+        <!--batery  optimization-->
+        <Button
+            android:id="@+id/btnDisableBatteryOptimization"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Disable Battery Optimization" />
+
+        <ScrollView
+            xmlns:android="http://schemas.android.com/apk/res/android"
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:background="@drawable/bg_gradient_dark">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="24dp">
+
+                <!-- ================================================= -->
+                <!-- HERO HEADER -->
+                <!-- ================================================= -->
+
+
+
+                <!-- ================================================= -->
+                <!-- CURRENT STEP CARD -->
+                <!-- ================================================= -->
+
+
+                <!-- ================================================= -->
+                <!-- PRIMARY ACTION -->
+                <!-- ================================================= -->
+
+
+                <!-- ================================================= -->
+                <!-- ACCESSIBILITY HELP -->
+                <!-- ================================================= -->
+
+
+
+                <!-- ================================================= -->
+                <!-- NOTIFICATION STATUS -->
+                <!-- ================================================= -->
+
+
+                <!-- ================================================= -->
+                <!-- TIMELINE / PROGRESS -->
+                <!-- ================================================= -->
+
+
+                <!-- ================================================= -->
+                <!-- SECURITY STATUS -->
+                <!-- ================================================= -->
+
+                <include
+                    android:id="@+id/securityCard"
+                    layout="@layout/setup_security_card" />
+
+            </LinearLayout>
+
+        </ScrollView>
+
+    </LinearLayout>
+
+</ScrollView>

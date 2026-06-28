@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/overlayRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <!-- DARK OVERLAY -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#88000000"/>
+
+    <!-- GLASS CARD -->
+    <LinearLayout
+        android:id="@+id/lockCard"
+        android:layout_width="340dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="30dp"
+        android:background="@drawable/bg_gradient_stroke"
+        android:elevation="24dp">
+
+        <!-- ANIMATED LOCK ICON -->
+        <com.airbnb.lottie.LottieAnimationView
+            android:id="@+id/lockAnimation"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_marginBottom="12dp"
+            android:background="@android:color/transparent"
+            app:lottie_rawRes="@raw/lock_animation"
+            app:lottie_autoPlay="true"
+            app:lottie_loop="true"/>
+
+        <!-- TITLE -->
+        <TextView
+            android:id="@+id/tvOverlayTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Screen Time Reached"
+            android:textColor="#FFFFFF"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:gravity="center"/>
+
+        <!-- DESCRIPTION -->
+        <TextView
+            android:id="@+id/overlayMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="This device is temporarily locked by parental controls."
+            android:textColor="#B0BEC5"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="18dp"/>
+
+        <!-- LIVE COUNTDOWN -->
+        <TextView
+            android:id="@+id/tvCountdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Unlocks in 02:14:32"
+            android:textColor="#00E5FF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="26dp"/>
+
+        <!-- UNLOCK TIME -->
+        <TextView
+            android:id="@+id/tvUnlockTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Unlocks At • 08:00 PM"
+            android:textColor="#FFD54F"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp"/>
+
+        <!-- TIME REMAINING -->
+        <TextView
+            android:id="@+id/tvTimeRemaining"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Time Remaining • 02h 14m 32s"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="24dp"/>
+
+
+        <!-- REQUEST BUTTON -->
+        <Button
+            android:id="@+id/btnRequestMoreTime"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="Request 15 More Minutes"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:textSize="15sp"
+            android:background="@drawable/bg_neon_button"
+            android:layout_marginBottom="14dp"/>
+
+        <!-- CLOSE BUTTON -->
+
+
+        <!-- EXIT BUTTON -->
+
+
+    </LinearLayout>
+
+</FrameLayout>

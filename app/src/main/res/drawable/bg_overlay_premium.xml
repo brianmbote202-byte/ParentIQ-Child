@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <!-- Glass-like dark blue gradient -->
+    <gradient
+        android:type="linear"
+        android:angle="270"
+        android:startColor="#25364A"
+        android:centerColor="#162332"
+        android:endColor="#0B1320"/>
+
+    <!-- Rounded premium corners -->
+    <corners
+        android:radius="30dp"/>
+
+    <!-- Neon cyan border -->
+    <stroke
+        android:width="2.5dp"
+        android:color="#38E8FF"/>
+
+    <!-- Gives breathing room inside the card -->
+    <padding
+        android:left="4dp"
+        android:top="4dp"
+        android:right="4dp"
+        android:bottom="4dp"/>
+
+</shape>
+

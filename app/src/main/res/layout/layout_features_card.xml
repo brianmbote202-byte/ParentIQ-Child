@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="16dp"
+    android:backgroundTint="@color/premium_card"
+    app:cardCornerRadius="28dp"
+    app:strokeColor="@color/gold_glow"
+    app:strokeWidth="1dp"
+    app:cardElevation="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Header -->
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="20dp"
+            android:text="Premium Features"
+            android:textColor="@color/gold_primary"
+            android:textSize="18sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="4dp"
+            android:text="Swipe to explore available protections"
+            android:textColor="#99FFFFFF"
+            android:textSize="12sp"/>
+
+        <!-- Horizontal Features -->
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="20dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
+
+                <!-- Live Tracking -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardTracking"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_location"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Live Tracking"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Protection -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardProtection"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_shield"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Protection"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Insights -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardInsights"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_chart"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Insights"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Alerts -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardAlerts"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_notifications"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Alerts"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Block Sites -->
+
+                <!-- Block Sites -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardBlockSites"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_block"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Block Sites"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardVisitedSites"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_globe"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Tracks visited Sites"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardControlScreenTime"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_screen"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Controls Screen Time"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardSafeZones"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_zone"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Track Entry and Exit of places"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardPhoneCalls"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_call"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Track Phone Calls"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardMessages"
+                    android:layout_width="120dp"
+                    android:layout_height="130dp"
+                    android:layout_marginEnd="12dp"
+                    android:backgroundTint="#172550"
+                    app:cardCornerRadius="20dp"
+                    app:strokeColor="@color/gold_glow"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:src="@drawable/ic_message"
+                            app:tint="@color/gold_primary"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Messages"
+                            android:textColor="@color/gold_light"
+                            android:textStyle="bold"
+                            android:gravity="center"/>
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+
+
+
+
+            </LinearLayout>
+
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

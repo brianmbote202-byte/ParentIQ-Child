@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <!-- DARK SCRIM -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000" />
+
+    <!-- PREMIUM CARD -->
+    <LinearLayout
+        android:id="@+id/lockCard"
+        android:layout_width="340dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="28dp"
+        android:background="@drawable/bg_gradient_stroke"
+        android:elevation="20dp">
+
+        <!-- ICON (you can replace with Lottie later) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🔒"
+            android:textSize="48sp"
+            android:layout_marginBottom="10dp"/>
+
+        <!-- TITLE -->
+        <TextView
+            android:id="@+id/tvOverlayTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="App Blocked"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:gravity="center"/>
+
+        <!-- MESSAGE -->
+        <TextView
+            android:id="@+id/blockMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="This app is blocked by parental controls"
+            android:textColor="#B0BEC5"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="18dp"/>
+
+        <!-- APP NAME BADGE -->
+        <TextView
+            android:id="@+id/tvAppName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Chrome"
+            android:textColor="#00E5FF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="20dp"/>
+
+        <!-- COUNT DOWN-->
+        <TextView
+            android:id="@+id/tvCountdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Unlocks in 00:00:00"
+            android:textColor="#00E5FF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- TIMER TO UNLOCK -->
+        <TextView
+            android:id="@+id/tvUsage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Today used • 0 min"
+            android:textColor="#B0BEC5"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"/>
+
+        <!-- CLOSE BUTTON -->
+        <Button
+            android:id="@+id/closeOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Close"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/bg_neon_button"/>
+    </LinearLayout>
+
+</FrameLayout>

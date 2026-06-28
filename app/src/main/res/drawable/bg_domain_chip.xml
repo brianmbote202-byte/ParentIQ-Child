@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Dark premium background -->
+    <solid android:color="#16354A"/>
+
+    <!-- Rounded pill -->
+    <corners android:radius="28dp"/>
+
+    <!-- Bright cyan outline -->
+    <solid android:color="#183A52"/>
+
+    <!-- Comfortable padding -->
+    <padding
+        android:left="20dp"
+        android:right="20dp"
+        android:top="10dp"
+        android:bottom="10dp"/>
+
+</shape>
+
