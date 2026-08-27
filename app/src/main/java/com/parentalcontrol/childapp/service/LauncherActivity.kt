@@ -11,6 +11,7 @@ import com.parentalcontrol.childapp.service.MonitoringService
 import androidx.work.*
 import java.util.concurrent.TimeUnit
 import com.parentalcontrol.childapp.worker.ServiceHealthWorker
+import com.parentalcontrol.childapp.service.ChildAppControlService
 
 class LauncherActivity : AppCompatActivity() {
 
@@ -78,7 +79,7 @@ class LauncherActivity : AppCompatActivity() {
                         AppSyncService::class.java
                     )
 
-                //startServiceSafe(appSyncIntent)
+                startServiceSafe(appSyncIntent)
                 if (!childId.isNullOrEmpty()) {
 
                     Log.e(TAG, "✅ DEVICE PAIRED")
@@ -121,6 +122,29 @@ class LauncherActivity : AppCompatActivity() {
                 Log.e(
                     TAG,
                     "❌ MonitoringService failed",
+                    e
+                )
+            }
+
+            try {
+
+                Log.e(TAG, "🚀 Starting ChildAppControlService")
+
+                val controlIntent =
+                    Intent(
+                        this,
+                        ChildAppControlService::class.java
+                    )
+
+                startServiceSafe(controlIntent)
+
+                Log.e(TAG, "✅ ChildAppControlService started")
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "❌ ChildAppControlService failed",
                     e
                 )
             }

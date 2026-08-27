@@ -16,6 +16,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
 import com.parentalcontrol.childapp.R
 import android.location.Geocoder
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.parentalcontrol.childapp.geofence.GeofenceManager
 import java.util.Locale
 import okhttp3.*
@@ -33,6 +34,8 @@ class ChildLocationService : Service() {
         private const val TAG = "ChildLocationService"
         private const val CHANNEL_ID = "location_tracking_channel"
         private const val NOTIF_ID = 2001
+
+
 
 
         // Minimum distance to save history (meters)
@@ -65,6 +68,8 @@ class ChildLocationService : Service() {
 
 
     }
+
+    private var locationGeneration = 0L
 
     private lateinit var geocoder: android.location.Geocoder
     private var lastBatteryLevel = -1
@@ -133,13 +138,43 @@ class ChildLocationService : Service() {
         startForegroundNotification()
         childId = loadChildId()
 
+        Log.d(
+            "LOCATION_DEBUG",
+            "Service started. Loaded childId=$childId"
+        )
+
         if (childId.isNullOrEmpty()) {
-            Log.e(TAG, "Child ID missing — retrying in 3s")
+
+            Log.e(
+                "LOCATION_DEBUG",
+                "❌ CHILD ID IS MISSING"
+            )
+
             handler.postDelayed({
+
                 childId = loadChildId()
-                if (!childId.isNullOrEmpty()) initializeLocation()
-                else stopSelf()
+
+                Log.d(
+                    "LOCATION_DEBUG",
+                    "Child ID retry result=$childId"
+                )
+
+                if (!childId.isNullOrEmpty()) {
+
+                    initializeLocation()
+
+                } else {
+
+                    Log.e(
+                        "LOCATION_DEBUG",
+                        "❌ Child ID still missing. Stopping service."
+                    )
+
+                    stopSelf()
+                }
+
             }, 3000)
+
             return START_STICKY
         }
 
@@ -174,18 +209,89 @@ class ChildLocationService : Service() {
     // Initialize location updates
     // -----------------------------
     private fun initializeLocation() {
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            30_000L
+        fusedLocationClient =
+            LocationServices.getFusedLocationProviderClient(this)
+
+        locationRequest =
+            LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                10_000L
+            )
+                .setMinUpdateIntervalMillis(5_000L)
+                .setMaxUpdateDelayMillis(10_000L)
+                .setWaitForAccurateLocation(false)
+                .build()
+
+        if (
+            ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+
+            Log.e(
+                TAG,
+                "ACCESS_FINE_LOCATION permission missing"
+            )
+
+            stopSelf()
+            return
+        }
+
+        Log.d(
+            "LOCATION_DEBUG",
+            "Starting location initialization"
         )
-            .setMinUpdateIntervalMillis(15_000L)
-            .setWaitForAccurateLocation(true)
-            .build()
 
-        startLocationUpdates()
-        handler.postDelayed(stationaryRunnable, HISTORY_INTERVAL)
+        // -------------------------------------------------
+        // Get one immediate location
+        // -------------------------------------------------
+        fusedLocationClient
+            ?.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                null
+            )
+            ?.addOnSuccessListener { location ->
+
+                if (location != null) {
+
+                    Log.d(
+                        "LOCATION_DEBUG",
+                        "Initial GPS location received: " +
+                                "${location.latitude}, ${location.longitude}"
+                    )
+
+                    handleLocation(location)
+
+                } else {
+
+                    Log.w(
+                        "LOCATION_DEBUG",
+                        "Initial getCurrentLocation returned NULL"
+                    )
+                }
+
+                startLocationUpdates()
+            }
+            ?.addOnFailureListener { error ->
+
+                Log.e(
+                    "LOCATION_DEBUG",
+                    "Initial getCurrentLocation FAILED",
+                    error
+                )
+
+                // Still start continuous updates.
+                startLocationUpdates()
+            }
+
+        handler.removeCallbacks(stationaryRunnable)
+
+        handler.postDelayed(
+            stationaryRunnable,
+            HISTORY_INTERVAL
+        )
     }
 
     //----------------has locations cordinates changed---------
@@ -236,34 +342,89 @@ class ChildLocationService : Service() {
     }
 
     private fun startLocationUpdates() {
-        if (ActivityCompat.checkSelfPermission(
+
+        if (
+            ActivityCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            Log.e(TAG, "Location permission missing")
+
+            Log.e(
+                TAG,
+                "Location permission missing"
+            )
+
             stopSelf()
             return
         }
 
-        fusedLocationClient?.requestLocationUpdates(
-            locationRequest,
-            locationCallback,
-            Looper.getMainLooper()
+        Log.d(
+            "LOCATION_DEBUG",
+            "REQUESTING CONTINUOUS LOCATION UPDATES"
         )
+
+        fusedLocationClient
+            ?.requestLocationUpdates(
+                locationRequest,
+                locationCallback,
+                Looper.getMainLooper()
+            )
+            ?.addOnSuccessListener {
+
+                Log.d(
+                    "LOCATION_DEBUG",
+                    "Continuous location updates STARTED"
+                )
+            }
+            ?.addOnFailureListener { error ->
+
+                Log.e(
+                    "LOCATION_DEBUG",
+                    "FAILED TO START LOCATION UPDATES",
+                    error
+                )
+            }
     }
+
 
     // -----------------------------
     // Location callback
     // -----------------------------
     private val locationCallback = object : LocationCallback() {
+
         override fun onLocationResult(result: LocationResult) {
+
+            Log.d(
+                "LOCATION_DEBUG",
+                "onLocationResult FIRED: ${result.locations.size} locations"
+            )
+
             result.locations.forEach { location ->
-                if (location.accuracy <= MAX_ACCEPTABLE_ACCURACY) {
-                    handleLocation(location)
-                } else {
-                    Log.d(TAG, "Ignored location due to poor accuracy: ${location.accuracy}")
+
+                Log.d(
+                    "LOCATION_DEBUG",
+                    """
+                GPS RECEIVED
+                lat=${location.latitude}
+                lng=${location.longitude}
+                accuracy=${location.accuracy}
+                speed=${location.speed}
+                time=${location.time}
+                """.trimIndent()
+                )
+
+                if (location.accuracy > MAX_ACCEPTABLE_ACCURACY) {
+
+                    Log.d(
+                        TAG,
+                        "Ignoring poor GPS: ${location.accuracy}m"
+                    )
+
+                    return@forEach
                 }
+
+                handleLocation(location)
             }
         }
     }
@@ -274,53 +435,110 @@ class ChildLocationService : Service() {
     private fun handleLocation(location: Location) {
 
         val id = childId ?: return
-        val timestamp = location.time.takeIf { it > 0 } ?: System.currentTimeMillis()
 
-        // -----------------------------
-        // Movement detection
-        // -----------------------------
-        val distanceMoved = lastHistoryLocation?.distanceTo(location) ?: Float.MAX_VALUE
-        val isMoving = distanceMoved > 10f || location.speed > MIN_SPEED_MOVING
+        // ---------------------------------------------------------
+        // 1. Validate location accuracy
+        // ---------------------------------------------------------
+        if (location.accuracy > MAX_ACCEPTABLE_ACCURACY) {
+            Log.d(
+                TAG,
+                "Ignoring poor GPS accuracy: ${location.accuracy}m"
+            )
+            return
+        }
 
-        // -----------------------------
-        // Location change detection
-        // -----------------------------
-        val latChanged = lastLat?.let {
-            kotlin.math.abs(it - location.latitude) > 0.0001
-        } ?: true
+        // ---------------------------------------------------------
+        // 2. Reject impossible GPS jumps
+        // ---------------------------------------------------------
+        lastUploadedLocation?.let { oldLocation ->
 
-        val lngChanged = lastLng?.let {
-            kotlin.math.abs(it - location.longitude) > 0.0001
-        } ?: true
+            val distance = oldLocation.distanceTo(location)
+
+            if (
+                distance > 200f &&
+                location.time - oldLocation.time < 5000
+            ) {
+                Log.d(
+                    TAG,
+                    "Ignoring GPS jump: ${distance}m in <5 seconds"
+                )
+                return
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 3. Reject impossible speed
+        // ---------------------------------------------------------
+        if (location.hasSpeed() && location.speed > 50f) {
+
+            Log.d(
+                TAG,
+                "Ignoring invalid speed: ${location.speed} m/s"
+            )
+
+            return
+        }
+
+        // ---------------------------------------------------------
+        // 4. Timestamp
+        // ---------------------------------------------------------
+        val timestamp =
+            location.time.takeIf { it > 0 }
+                ?: System.currentTimeMillis()
+
+        // ---------------------------------------------------------
+        // 5. Movement detection
+        // ---------------------------------------------------------
+        val distanceMoved =
+            lastHistoryLocation?.distanceTo(location)
+                ?: Float.MAX_VALUE
+
+        val isMoving =
+            distanceMoved > 10f ||
+                    (location.hasSpeed() && location.speed > MIN_SPEED_MOVING)
+
+        // ---------------------------------------------------------
+        // 6. Detect coordinate change
+        // ---------------------------------------------------------
+        val latChanged =
+            lastLat?.let {
+                kotlin.math.abs(it - location.latitude) > 0.00001
+            } ?: true
+
+        val lngChanged =
+            lastLng?.let {
+                kotlin.math.abs(it - location.longitude) > 0.00001
+            } ?: true
 
         val locationChanged = latChanged || lngChanged
 
-        // -----------------------------
-        // BASE DATA
-        // -----------------------------
-        val baseData: MutableMap<String, Any> = mutableMapOf(
-            "latitude" to location.latitude,
-            "longitude" to location.longitude,
-            "accuracy" to location.accuracy,
-            "speed" to location.speed,
-            "timestamp" to timestamp,
-            "isMoving" to isMoving
-        )
+        // ---------------------------------------------------------
+        // 7. New location generation
+        //
+        // Every new GPS fix gets a new generation number.
+        // This prevents an old Google geocoder response from
+        // overwriting a newer location.
+        // ---------------------------------------------------------
+        locationGeneration++
 
-        // attach last known place (prevents blank UI)
-        baseData.putAll(lastPlaceData)
+        val currentGeneration = locationGeneration
 
-        // -----------------------------
-        // BATTERY
-        // -----------------------------
+        // ---------------------------------------------------------
+        // 8. Battery
+        // ---------------------------------------------------------
         val batteryLevel = getBatteryLevel()
 
         val batteryChanged =
             lastBatteryLevel == -1 ||
                     kotlin.math.abs(lastBatteryLevel - batteryLevel) >= 3
 
-        if (batteryChanged) lastBatteryLevel = batteryLevel
+        if (batteryChanged) {
+            lastBatteryLevel = batteryLevel
+        }
 
+        // ---------------------------------------------------------
+        // 9. Update child online/status information
+        // ---------------------------------------------------------
         val statusUpdate = mutableMapOf<String, Any>(
             "online" to true,
             "lastSeen" to System.currentTimeMillis(),
@@ -336,144 +554,215 @@ class ChildLocationService : Service() {
             .getReference("children")
             .child(id)
             .updateChildren(statusUpdate)
-
-        // -----------------------------
-        // SAVE BASE DATA IMMEDIATELY
-        // -----------------------------
-        val latestRef = FirebaseDatabase.getInstance()
-            .getReference("child_locations")
-            .child(id)
-            .child("latest")
-
-        if (hasLocationChanged(
-                location.latitude,
-                location.longitude
-            )
-        ) {
-
-            val previous = lastUploadedLocation
-
-            val shouldUpload = if (previous == null) {
-
-                true
-
-            } else {
-
-                previous.distanceTo(location) >= 15f
-            }
-
-            if (shouldUpload) {
-
-                latestRef.setValue(baseData)
-
-                lastUploadedLocation = location
-
-                Log.d(
+            .addOnFailureListener {
+                Log.e(
                     TAG,
-                    "Uploaded new location"
-                )
-
-            } else {
-
-                Log.d(
-                    TAG,
-                    "Skipped duplicate location"
+                    "Failed to update child status",
+                    it
                 )
             }
 
-            Log.d(
-                TAG,
-                "Location changed -> Firebase updated"
-            )
+        // ---------------------------------------------------------
+        // 10. Firebase latest location
+        //
+        // IMPORTANT:
+        // Coordinates are written IMMEDIATELY.
+        //
+        // We do NOT wait for reverse geocoding.
+        // ---------------------------------------------------------
+        val latestRef =
+            FirebaseDatabase.getInstance()
+                .getReference("child_locations")
+                .child(id)
+                .child("latest")
 
-        } else {
+        val latestData = mutableMapOf<String, Any>(
 
-            Log.d(
-                TAG,
-                "Same coordinates -> skipped Firebase write"
-            )
-        }
+            "latitude" to location.latitude,
 
-// -----------------------------
-// GEOFENCE CHECK
-// -----------------------------
-        geofenceManager.checkGeofences(
+            "longitude" to location.longitude,
 
-            id,
+            "accuracy" to location.accuracy,
 
-            location.latitude,
+            "speed" to location.speed,
 
-            location.longitude
+            "timestamp" to timestamp,
+
+            "isMoving" to isMoving,
+
+            "status" to if (isMoving) "Moving" else "Idle",
+
+            "lastUpdated" to System.currentTimeMillis()
         )
 
+        // ---------------------------------------------------------
+        // 11. Write CURRENT coordinates immediately
+        //
+        // This is the important fix.
+        // ---------------------------------------------------------
+        latestRef
+            .setValue(latestData)
+            .addOnSuccessListener {
 
-        // update lat/lng cache
+                Log.d(
+                    TAG,
+                    "LATEST LOCATION UPDATED: " +
+                            "${location.latitude}, ${location.longitude}"
+                )
+
+                lastUploadedLocation = location
+            }
+            .addOnFailureListener {
+
+                Log.e(
+                    TAG,
+                    "FAILED TO UPDATE LATEST LOCATION",
+                    it
+                )
+            }
+
+        // ---------------------------------------------------------
+        // 12. Update cached coordinates
+        // ---------------------------------------------------------
         lastLat = location.latitude
         lastLng = location.longitude
 
-        // -----------------------------
-        // FETCH ADDRESS (ASYNC)
-        // -----------------------------
+        // ---------------------------------------------------------
+        // 13. Reverse geocode ONLY when coordinates changed
+        // ---------------------------------------------------------
         if (locationChanged) {
-            fetchPlaceFromApi(location.latitude, location.longitude) { result ->
 
-                Log.d("GEOCODE_API", "Result: $result")
+            fetchPlaceFromApi(
+                location.latitude,
+                location.longitude
+            ) { place ->
 
-                // fallback or new data
-                if (result.isNotEmpty()) {
+                // -------------------------------------------------
+                // IMPORTANT:
+                // If another GPS location arrived while Google
+                // was processing this request, IGNORE this result.
+                // -------------------------------------------------
+                if (currentGeneration != locationGeneration) {
 
-                    // Remove empty values (CRITICAL FIX)
-                    val cleanResult = result.filterValues {
-                        it.toString().isNotBlank()
-                    }
+                    Log.d(
+                        TAG,
+                        "Ignoring stale geocoder response"
+                    )
 
-                    if (cleanResult.isNotEmpty()) {
-                        lastPlaceData = cleanResult
-                    } else {
-                        Log.e("GEOCODE_API", "All values empty, keeping old place")
-                    }
-
-                } else {
-                    Log.e("GEOCODE_API", "Empty result, using cached place")
+                    return@fetchPlaceFromApi
                 }
 
-                // ALWAYS merge (important fix)
-                val updatedData = baseData.toMutableMap()
-                updatedData.putAll(lastPlaceData)
+                if (place.isEmpty()) {
 
-                latestRef.setValue(updatedData)
+                    Log.d(
+                        TAG,
+                        "Geocoder returned empty result; keeping coordinates"
+                    )
+
+                    return@fetchPlaceFromApi
+                }
+
+                val cleanPlace = place.filterValues {
+                    it.toString().isNotBlank()
+                }
+
+                if (cleanPlace.isEmpty()) {
+                    return@fetchPlaceFromApi
+                }
+
+                // -------------------------------------------------
+                // Update ONLY the address fields.
+                //
+                // Coordinates remain untouched.
+                // -------------------------------------------------
+                latestRef
+                    .updateChildren(cleanPlace)
+                    .addOnSuccessListener {
+
+                        Log.d(
+                            TAG,
+                            "LATEST ADDRESS UPDATED: $cleanPlace"
+                        )
+                    }
+                    .addOnFailureListener {
+
+                        Log.e(
+                            TAG,
+                            "Failed to update latest address",
+                            it
+                        )
+                    }
             }
         }
 
-        // -----------------------------
-        // HISTORY (FIXED: includes place data)
-        // -----------------------------
-        val minDistance = if (isMoving) MIN_DISTANCE_METERS else 5f
-
-        if (distanceMoved > minDistance || lastHistoryLocation == null) {
-
-            val fullData = baseData.toMutableMap().apply {
-                putAll(lastPlaceData)
-                put("status", if (isMoving) "Moving" else "Idle")
+        // ---------------------------------------------------------
+        // 14. History
+        // ---------------------------------------------------------
+        val minDistance =
+            if (isMoving) {
+                MIN_DISTANCE_METERS
+            } else {
+                5f
             }
 
-            historyBatch[timestamp] = fullData
+        if (
+            distanceMoved > minDistance ||
+            lastHistoryLocation == null
+        ) {
+
+            val historyData = mutableMapOf<String, Any>(
+
+                "latitude" to location.latitude,
+
+                "longitude" to location.longitude,
+
+                "accuracy" to location.accuracy,
+
+                "speed" to location.speed,
+
+                "timestamp" to timestamp,
+
+                "isMoving" to isMoving,
+
+                "status" to if (isMoving) "Moving" else "Idle"
+            )
+
+            historyBatch[timestamp] = historyData
+
             lastHistoryLocation = location
 
             locationUpdateListener?.onNewLocation(location)
         }
 
-        // -----------------------------
-        // PUSH BATCH
-        // -----------------------------
-        val timeSinceLastPush = System.currentTimeMillis() - lastBatchPushTime
+        // ---------------------------------------------------------
+        // 15. Push history batch
+        // ---------------------------------------------------------
+        val timeSinceLastPush =
+            System.currentTimeMillis() - lastBatchPushTime
 
-        if (timeSinceLastPush > BATCH_PUSH_INTERVAL ||
+        if (
+            timeSinceLastPush > BATCH_PUSH_INTERVAL ||
             historyBatch.size >= MAX_BATCH_SIZE
         ) {
             pushHistoryBatch()
         }
-        Log.d("LOCATION_DEBUG", "Location changed: $locationChanged")
+
+        // ---------------------------------------------------------
+        // 16. Debug
+        // ---------------------------------------------------------
+        Log.d(
+            "LOCATION_DEBUG",
+            """
+        Location processed
+        lat=${location.latitude}
+        lng=${location.longitude}
+        accuracy=${location.accuracy}
+        speed=${location.speed}
+        moving=$isMoving
+        changed=$locationChanged
+        generation=$currentGeneration
+        """.trimIndent()
+        )
     }
 
     // =====================================================
@@ -879,6 +1168,7 @@ class ChildLocationService : Service() {
             }
         }.start()
     }
+
 
     // -----------------------------
     // Helpers

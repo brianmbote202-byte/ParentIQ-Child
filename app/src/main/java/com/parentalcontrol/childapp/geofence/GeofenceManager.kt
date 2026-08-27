@@ -18,9 +18,7 @@ class GeofenceManager {
     private val geofenceStates =
         mutableMapOf<String, Boolean>()
 
-    // Active sessions
-    private val activeGeofenceSessions =
-        mutableMapOf<String, String>()
+
 
     //======geofence handler======
     private val geofenceHandler = Handler(Looper.getMainLooper())
@@ -34,63 +32,42 @@ class GeofenceManager {
     // =====================================================
 
     fun checkGeofences(
-
         childId: String,
-
         currentLat: Double,
-
         currentLng: Double
     ) {
 
-        Log.d(
-            "GeofenceManager",
-            "Checking geofences for $childId"
-        )
+        Log.d(TAG, "Checking geofences for $childId")
 
         FirebaseDatabase.getInstance()
             .getReference("geofences")
             .child(childId)
-
             .get()
-
             .addOnSuccessListener { snapshot ->
+
+                Log.d(TAG, "Loaded ${snapshot.childrenCount} geofences")
 
                 snapshot.children.forEach { snap ->
 
-                    Log.d(
-                        "GeofenceManager",
-                        "Loaded ${snapshot.childrenCount} geofences"
-                    )
+                    val latitude = snap.child("latitude")
+                        .getValue(Double::class.java) ?: 0.0
 
+                    val longitude = snap.child("longitude")
+                        .getValue(Double::class.java) ?: 0.0
 
-                    val latitude =
-                        snap.child("latitude")
-                            .getValue(Double::class.java)
-                            ?: 0.0
+                    val radius = snap.child("radius")
+                        .getValue(Int::class.java) ?: 0
 
-                    val longitude =
-                        snap.child("longitude")
-                            .getValue(Double::class.java)
-                            ?: 0.0
+                    val name = snap.child("name")
+                        .getValue(String::class.java) ?: "Unknown"
 
-                    val radius =
-                        snap.child("radius")
-                            .getValue(Int::class.java)
-                            ?: 0
-
-                    val name =
-                        snap.child("name")
-                            .getValue(String::class.java)
-                            ?: "Unknown"
+                    val geofenceKey = snap.key ?: name
 
                     val inside = isInsideGeofence(
-
                         currentLat,
                         currentLng,
-
                         latitude,
                         longitude,
-
                         radius
                     )
 
@@ -101,18 +78,14 @@ class GeofenceManager {
                         longitude
                     )
 
-                    val geofenceKey =
-                        snap.key ?: name
+                    val previousState = geofenceStates[geofenceKey]
 
-                    val previousState =
-                        geofenceStates[geofenceKey]
+                    //---------------------------------------
+                    // ENTER
+                    //---------------------------------------
 
-                    // ENTERED
                     if (inside && previousState != true) {
 
-                        val geofenceKey = snap.key ?: name
-
-                        // cancel any previous pending task
                         pendingGeofenceTasks[geofenceKey]?.let {
                             geofenceHandler.removeCallbacks(it)
                         }
@@ -120,6 +93,8 @@ class GeofenceManager {
                         val task = Runnable {
 
                             geofenceStates[geofenceKey] = true
+
+                            pendingGeofenceTasks.remove(geofenceKey)
 
                             sendGeofenceEntered(
                                 childId,
@@ -129,21 +104,19 @@ class GeofenceManager {
                                 currentLng,
                                 distanceMeters,
                                 radius
-
-
                             )
                         }
 
-
                         pendingGeofenceTasks[geofenceKey] = task
 
-                        geofenceHandler.postDelayed(task, 15000) // 15 seconds debounce
+                        geofenceHandler.postDelayed(task, 15_000)
                     }
 
-                    // EXITED
-                    else if (!inside && previousState != false) {
+                    //---------------------------------------
+                    // EXIT
+                    //---------------------------------------
 
-                        val geofenceKey = snap.key ?: name
+                    else if (!inside && previousState != false) {
 
                         pendingGeofenceTasks[geofenceKey]?.let {
                             geofenceHandler.removeCallbacks(it)
@@ -152,6 +125,8 @@ class GeofenceManager {
                         val task = Runnable {
 
                             geofenceStates[geofenceKey] = false
+
+                            pendingGeofenceTasks.remove(geofenceKey)
 
                             sendGeofenceExited(
                                 childId,
@@ -162,9 +137,12 @@ class GeofenceManager {
 
                         pendingGeofenceTasks[geofenceKey] = task
 
-                        geofenceHandler.postDelayed(task, 8000) // 8 seconds debounce
+                        geofenceHandler.postDelayed(task, 8_000)
                     }
                 }
+            }
+            .addOnFailureListener {
+                Log.e(TAG, "Failed to load geofences", it)
             }
     }
 
@@ -221,6 +199,17 @@ class GeofenceManager {
         return results[0]
     }
 
+
+
+    //--------get active session----------
+    private fun getActiveSessionRef(
+        childId: String,
+        geofenceId: String
+    ) =
+        FirebaseDatabase.getInstance()
+            .getReference("active_geofence_sessions")
+            .child(childId)
+            .child(geofenceId)
     // =====================================================
     // ENTERED
     // =====================================================
@@ -235,118 +224,213 @@ class GeofenceManager {
         radius: Int
     ) {
 
-        val timestamp =
-            System.currentTimeMillis()
+        val sessionRef = getActiveSessionRef(childId, geofenceKey)
 
-        val ref = FirebaseDatabase.getInstance()
-            .getReference("geofence_alerts")
-            .child(childId)
-            .push()
+        sessionRef.get()
+            .addOnSuccessListener { session ->
 
-        val alertKey =
-            ref.key ?: return
+                // Already inside this geofence?
+                if (session.exists()) {
+                    Log.d(TAG, "$geofenceName already active")
+                    return@addOnSuccessListener
+                }
 
-        val data = mapOf(
+                //----------------------------------------
+                // Create new alert
+                //----------------------------------------
 
-            "geofenceId" to geofenceKey,
+                val alertRef = FirebaseDatabase.getInstance()
+                    .getReference("geofence_alerts")
+                    .child(childId)
+                    .push()
 
-            "geofenceName" to geofenceName,
+                val alertId = alertRef.key
+                    ?: return@addOnSuccessListener
 
-            "transitionType" to "ENTER",
+                val now = System.currentTimeMillis()
 
-            "enteredAt" to timestamp,
+                val data = mapOf(
+                    "geofenceId" to geofenceKey,
+                    "geofenceName" to geofenceName,
+                    "transitionType" to "ENTER",
+                    "enteredAt" to now,
+                    "exitedAt" to 0,
+                    "durationMinutes" to 0,
+                    "status" to "active",
+                    "latitude" to latitude,
+                    "longitude" to longitude,
+                    "distance" to distanceMeters,
+                    "radius" to radius
+                )
 
-            "exitedAt" to 0,
+                //----------------------------------------
+                // Step 1: Save alert
+                //----------------------------------------
 
-            "durationMinutes" to 0,
+                alertRef.setValue(data)
+                    .addOnSuccessListener {
 
-            "status" to "active",
+                        //----------------------------------------
+                        // Step 2: Save active session
+                        //----------------------------------------
 
-            "latitude" to latitude,
+                        sessionRef.setValue(
+                            mapOf(
+                                "alertId" to alertId,
+                                "startedAt" to now
+                            )
+                        )
+                            .addOnSuccessListener {
 
-            "longitude" to longitude,
+                                //----------------------------------------
+                                // Step 3: Update live status
+                                //----------------------------------------
 
-           "distance"  to  distanceMeters,
+                                updateCurrentGeofenceStatus(
+                                    childId,
+                                    geofenceKey,
+                                    geofenceName,
+                                    latitude,
+                                    longitude,
+                                    true,
+                                    distanceMeters,
+                                    radius
+                                )
 
-            "radius" to  radius
-        )
+                                Log.d(
+                                    TAG,
+                                    "Started geofence session for $geofenceName"
+                                )
+                            }
+                            .addOnFailureListener { e ->
 
-        ref.setValue(data)
+                                Log.e(
+                                    TAG,
+                                    "Failed to save active session",
+                                    e
+                                )
 
+                                // Roll back the alert since the session failed
+                                alertRef.removeValue()
+                            }
+                    }
+                    .addOnFailureListener { e ->
 
-        updateCurrentGeofenceStatus(
-            childId,
-            geofenceKey,
-            geofenceName,
-            latitude,
-            longitude,
-            true,
-            distanceMeters,
-            radius
-        )
+                        Log.e(
+                            TAG,
+                            "Failed to create geofence alert",
+                            e
+                        )
+                    }
+            }
+            .addOnFailureListener { e ->
 
-        activeGeofenceSessions[geofenceKey] =
-            alertKey
+                Log.e(
+                    TAG,
+                    "Failed to read active session",
+                    e
+                )
+            }
     }
-
     // =====================================================
     // EXITED
     // =====================================================
-
     private fun sendGeofenceExited(
-
         childId: String,
-
         geofenceKey: String,
-
         geofenceName: String
     ) {
 
-        val alertKey =
-            activeGeofenceSessions[geofenceKey]
-                ?: return
+        val sessionRef = getActiveSessionRef(childId, geofenceKey)
 
-        val exitedAt =
-            System.currentTimeMillis()
+        sessionRef.get()
+            .addOnSuccessListener { session ->
 
-        val ref = FirebaseDatabase.getInstance()
-            .getReference("geofence_alerts")
-            .child(childId)
-            .child(alertKey)
+                if (!session.exists()) {
+                    Log.d(TAG, "No active session for $geofenceName")
+                    return@addOnSuccessListener
+                }
 
-        ref.get().addOnSuccessListener { snapshot ->
+                val alertId = session.child("alertId")
+                    .getValue(String::class.java)
+                    ?: return@addOnSuccessListener
 
-            val enteredAt =
-                snapshot.child("enteredAt")
-                    .getValue(Long::class.java)
-                    ?: exitedAt
+                val alertRef = FirebaseDatabase.getInstance()
+                    .getReference("geofence_alerts")
+                    .child(childId)
+                    .child(alertId)
 
-            val durationMinutes =
-                ((exitedAt - enteredAt) / 1000 / 60).toInt()
+                val exitedAt = System.currentTimeMillis()
 
-            val updates = mapOf<String, Any>(
+                alertRef.get()
+                    .addOnSuccessListener { snapshot ->
 
-                "transitionType" to "EXIT",
+                        val enteredAt =
+                            snapshot.child("enteredAt")
+                                .getValue(Long::class.java)
+                                ?: exitedAt
 
-                "exitedAt" to exitedAt,
+                        val durationMinutes =
+                            ((exitedAt - enteredAt) / 60000).toInt()
 
-                "durationMinutes" to durationMinutes,
+                        val updates = mapOf<String, Any>(
+                            "transitionType" to "EXIT",
+                            "exitedAt" to exitedAt,
+                            "durationMinutes" to durationMinutes,
+                            "status" to "completed"
+                        )
 
-                "status" to "completed"
-            )
+                        // Step 1: Update the alert
+                        alertRef.updateChildren(updates)
+                            .addOnSuccessListener {
 
-            ref.updateChildren(updates)
+                                // Step 2: Remove active session
+                                sessionRef.removeValue()
+                                    .addOnSuccessListener {
 
-            markOutside(
-                childId,
-                geofenceKey,
-                geofenceName
-            )
+                                        // Step 3: Update current status
+                                        markOutside(
+                                            childId,
+                                            geofenceKey,
+                                            geofenceName
+                                        )
 
-            activeGeofenceSessions.remove(
-                geofenceKey
-            )
-        }
+                                        Log.d(
+                                            TAG,
+                                            "Completed geofence visit for $geofenceName"
+                                        )
+                                    }
+                                    .addOnFailureListener {
+                                        Log.e(
+                                            TAG,
+                                            "Failed to remove active session",
+                                            it
+                                        )
+                                    }
+                            }
+                            .addOnFailureListener {
+                                Log.e(
+                                    TAG,
+                                    "Failed to update geofence alert",
+                                    it
+                                )
+                            }
+                    }
+                    .addOnFailureListener {
+                        Log.e(
+                            TAG,
+                            "Failed to read geofence alert",
+                            it
+                        )
+                    }
+            }
+            .addOnFailureListener {
+                Log.e(
+                    TAG,
+                    "Failed to read active session",
+                    it
+                )
+            }
     }
     //live status
     private fun updateCurrentGeofenceStatus(

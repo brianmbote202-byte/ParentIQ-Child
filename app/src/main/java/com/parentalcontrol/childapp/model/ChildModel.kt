@@ -14,7 +14,9 @@ data class CallRecord(
     val provider: String = "Unknown",
     val country: String = "Unknown",
     val simSlot: Int = -1,
-    val simCarrier: String = "Unknown"
+    val simCarrier: String = "Unknown",
+    val subscriptionId: Int = -1
+
 )
 
 data class Message(

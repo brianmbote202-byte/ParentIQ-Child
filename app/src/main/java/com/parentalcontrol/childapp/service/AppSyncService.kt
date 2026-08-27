@@ -21,6 +21,11 @@ import com.google.firebase.storage.FirebaseStorage
 import com.parentalcontrol.childapp.model.AppInfo
 import java.io.ByteArrayOutputStream
 import com.parentalcontrol.childapp.utils.AppIconUtils
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
 
 
 class AppSyncService : Service() {
@@ -48,7 +53,7 @@ class AppSyncService : Service() {
 
         syncAppsToFirebase()
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     // ------------------------------------------------
@@ -76,18 +81,16 @@ class AppSyncService : Service() {
 
         val launcherApps = pm.queryIntentActivities(intent, 0)
 
-        val launcherPackages =
-            launcherApps.map {
-                it.activityInfo.packageName
-            }.toSet()
+        val launcherPackages = launcherApps.map {
+            it.activityInfo.packageName
+        }.toSet()
 
         Log.d(TAG, "📱 Launcher apps = ${launcherPackages.size}")
 
         // ----------------------------
         // 2. GET ALL INSTALLED APPS
         // ----------------------------
-        val installedApps =
-            pm.getInstalledApplications(0)
+        val installedApps = pm.getInstalledApplications(0)
 
         Log.d(TAG, "📦 Installed apps = ${installedApps.size}")
 
@@ -95,42 +98,48 @@ class AppSyncService : Service() {
             .getReference("installed_apps")
             .child(childId)
 
-        installedApps.forEach { app ->
+        // ------------------------------------------------
+        // STORE EVERY APP FOR USAGE TRACKING
+        // ------------------------------------------------
+        //val trackedPackages = mutableListOf<String>()
+
+        /*installedApps.forEach { app ->
 
             try {
 
                 val packageName = app.packageName
 
-                // Skip your own app
-                if (packageName == applicationContext.packageName) return@forEach
+                // Skip Parent App
+                if (packageName == applicationContext.packageName)
+                    return@forEach
 
-                val appName = pm.getApplicationLabel(app).toString()
-
-                val iconDrawable = pm.getApplicationIcon(app)
-                val iconBase64 = AppIconUtils.drawableToBase64(iconDrawable)
-
-                // ----------------------------
-                // 🔥 REAL HIDDEN DETECTION
-                // ----------------------------
-                val hidden =
-                    !launcherPackages.contains(packageName)
-
-                // ----------------------------
-                // SYSTEM APP FILTER (optional but recommended)
-                // ----------------------------
                 val isSystemApp =
                     (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
 
                 val isUpdatedSystemApp =
                     (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
 
-                if (isSystemApp && !isUpdatedSystemApp) {
+                // Ignore pure system apps
+                if (isSystemApp && !isUpdatedSystemApp)
                     return@forEach
-                }
 
-                // ----------------------------
-                // FINAL MODEL
-                // ----------------------------
+                // -----------------------------------------
+                // SAVE PACKAGE FOR USAGE LOGGER
+                // -----------------------------------------
+                trackedPackages.add(packageName)
+
+                val appName =
+                    pm.getApplicationLabel(app).toString()
+
+                val iconDrawable =
+                    pm.getApplicationIcon(app)
+
+                val iconBase64 =
+                    AppIconUtils.drawableToBase64(iconDrawable)
+
+                val hidden =
+                    !launcherPackages.contains(packageName)
+
                 val appInfo = AppInfo(
                     appName = appName,
                     packageName = packageName,
@@ -141,18 +150,201 @@ class AppSyncService : Service() {
                 dbRef.child(packageName.replace(".", "_"))
                     .setValue(appInfo)
                     .addOnSuccessListener {
-                        Log.d(TAG, "✅ SYNC SUCCESS: $packageName hidden=$hidden")
+                        Log.d(
+                            TAG,
+                            "✅ SYNC SUCCESS: $packageName hidden=$hidden"
+                        )
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "❌ SYNC FAILED: $packageName", e)
+                        Log.e(
+                            TAG,
+                            "❌ SYNC FAILED: $packageName",
+                            e
+                        )
                     }
 
             } catch (e: Exception) {
-                Log.e(TAG, "❌ ERROR PROCESSING APP", e)
+
+                Log.e(
+                    TAG,
+                    "❌ ERROR PROCESSING APP",
+                    e
+                )
+            }
+        }*/
+        val trackedPackages = mutableListOf<String>()
+        val updates = hashMapOf<String, Any>()
+
+        installedApps.forEach { app ->
+
+            try {
+
+                val packageName = app.packageName
+                if (
+                    packageName.equals(
+                        "com.google.android.apps.searchlite",
+                        ignoreCase = true
+                    )
+                ) {
+
+                    Log.e(
+                        TAG,
+                        """
+        ==========================================
+        🔥 GOOGLE GO DETECTED
+        ==========================================
+        App Name     = ${
+                            pm.getApplicationLabel(app)
+                        }
+        Package      = [$packageName]
+        Firebase Key = [${
+                            packageName.replace(".", "_")
+                        }]
+        System App   = ${
+                            (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                        }
+        Updated Sys  = ${
+                            (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        }
+        Launcher App = ${
+                            launcherPackages.contains(packageName)
+                        }
+        ==========================================
+        """.trimIndent()
+                    )
+                }
+
+                if (packageName == applicationContext.packageName)
+                    return@forEach
+
+                val isSystemApp =
+                    (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+
+                val isUpdatedSystemApp =
+                    (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
+                val isLauncherApp =
+                    launcherPackages.contains(packageName)
+
+                if (
+                    isSystemApp &&
+                    !isUpdatedSystemApp &&
+                    !isLauncherApp
+                ) {
+
+                    Log.d(
+                        TAG,
+                        "⏭️ Skipping pure hidden system app"
+                    )
+
+                    Log.d(
+                        TAG,
+                        "📦 Package = $packageName"
+                    )
+
+                    Log.d(
+                        TAG,
+                        "📱 Launcher = $isLauncherApp"
+                    )
+
+                    return@forEach
+                }
+
+                trackedPackages.add(packageName)
+
+                val appInfo = AppInfo(
+                    appName = pm.getApplicationLabel(app).toString(),
+                    packageName = packageName,
+                    iconBase64 = AppIconUtils.drawableToBase64(
+                        pm.getApplicationIcon(app)
+                    ),
+                    hidden = !launcherPackages.contains(packageName)
+                )
+
+                updates[packageName.replace(".", "_")] = appInfo
+
+            } catch (e: Exception) {
+
+                Log.e(TAG, "Failed to process ${app.packageName}", e)
             }
         }
 
-        Log.d(TAG, "🏁 SYNC COMPLETED")
+        dbRef.updateChildren(updates)
+
+            .addOnSuccessListener {
+
+                Log.d(TAG, "✅ Uploaded ${updates.size} apps.")
+
+                saveTrackedApps(trackedPackages)
+
+                startUsageWorker(trackedPackages)
+
+                stopSelf()
+            }
+
+            .addOnFailureListener {
+
+                Log.e(TAG, "Upload failed", it)
+            }
+
+        // ------------------------------------------------
+        // SAVE TRACKED APPS LOCALLY
+        // ------------------------------------------------
+        saveTrackedApps(trackedPackages)
+        startUsageWorker(trackedPackages)
+
+        Log.d(
+            TAG,
+            "🏁 SYNC COMPLETED. Tracked ${trackedPackages.size} apps."
+        )
+    }
+
+    //SAVE TRACKED APPS
+    private fun saveTrackedApps(apps: List<String>) {
+
+        val prefs = getSharedPreferences(
+            "usage_tracker",
+            Context.MODE_PRIVATE
+        )
+
+        prefs.edit()
+            .putStringSet(
+                "tracked_apps",
+                apps.toSet()
+            )
+            .apply()
+
+        Log.d(
+            TAG,
+            "Saved ${apps.size} tracked apps."
+        )
+    }
+
+    private fun startUsageWorker(installedPackages: List<String>) {
+
+        val childId = getChildId()
+
+        val data = workDataOf(
+            "childId" to childId,
+            "trackedApps" to installedPackages.toTypedArray()
+        )
+
+        val workRequest =
+            PeriodicWorkRequestBuilder<UsageLoggerWorker>(
+                15,
+                TimeUnit.MINUTES
+            )
+                .setInputData(data)
+                .build()
+
+        WorkManager.getInstance(this)
+            .enqueueUniquePeriodicWork(
+                "UsageLoggerWorker",
+                ExistingPeriodicWorkPolicy.UPDATE,
+                workRequest
+            )
+
+        Log.d(TAG, "Usage worker scheduled for ${installedPackages.size} apps")
     }
 
     // ------------------------------------------------

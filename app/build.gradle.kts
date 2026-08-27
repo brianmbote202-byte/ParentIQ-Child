@@ -109,6 +109,7 @@ dependencies {
     // Optional ML Kit helpers
     implementation("com.google.mlkit:vision-common:16.2.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    //implementation(libs.androidx.ui.text)
     //implementation(libs.androidx.compose.ui.text)
 
     // ---------------- TESTING ----------------

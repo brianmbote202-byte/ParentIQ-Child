@@ -13,6 +13,7 @@ import com.google.firebase.database.*
 import com.parentalcontrol.childapp.model.AppRule
 import android.app.AppOpsManager
 import android.os.Process
+import java.util.Calendar
 
 class ChildAppControlService : Service() {
 
@@ -219,60 +220,199 @@ class ChildAppControlService : Service() {
         })
     }
 
-    private fun enforceLimits() {
+   private fun enforceLimits() {
+
         val now = java.util.Calendar.getInstance()
+
         val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
+
+       val minute = now.get(java.util.Calendar.MINUTE)
+
+        val currentApp = getForegroundApp() ?: return
+
+        val rule = monitoredApps[currentApp] ?: return
+
+
+       // ---------------------------------------
+// APP ALLOWED TIME WINDOW
+// ---------------------------------------
+
+       val currentMinutes = hour * 60 + minute
+
+       val allowedFrom =
+           rule.allowed_from_hour * 60 +
+                   rule.allowed_from_minute
+
+       val allowedTo =
+           rule.allowed_to_hour * 60 +
+                   rule.allowed_to_minute
+
+
+       val outsideAllowedTime =
+           if (allowedFrom <= allowedTo) {
+
+               // Normal range (e.g. 08:00 -> 17:00)
+               currentMinutes < allowedFrom ||
+                       currentMinutes > allowedTo
+
+           } else {
+
+               // Overnight range (e.g. 22:00 -> 06:00)
+               currentMinutes > allowedTo &&
+                       currentMinutes < allowedFrom
+           }
+
         val inBlockedTime = blockSchedule?.let {
-            if (it.startHour <= it.endHour) hour in it.startHour until it.endHour
-            else hour >= it.startHour || hour < it.endHour
+            if (it.startHour <= it.endHour)
+                hour in it.startHour until it.endHour
+            else
+                hour >= it.startHour || hour < it.endHour
         } ?: false
 
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+
         val endTime = System.currentTimeMillis()
-        val startTime = endTime - 24*60*60*1000L
-        val statsList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
 
-        statsList.forEach { stats ->
+        val startTime = endTime - 24 * 60 * 60 * 1000L
 
-            val pkg = stats.packageName
-            val rule = monitoredApps[pkg] ?: return@forEach
+        /*val stats = usm.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY,
+            startTime,
+            endTime
+        ).firstOrNull {
+            it.packageName == currentApp
+        } ?: return
 
-            val totalTime = stats.totalTimeInForeground
-            val isOverLimit = rule.daily_limit > 0 && totalTime > rule.daily_limit
+        val totalTime = stats.totalTimeInForeground*/
+       val stats = usm.queryUsageStats(
+           UsageStatsManager.INTERVAL_DAILY,
+           startTime,
+           endTime
+       )
 
-            val isBlockedTime = inBlockedTime
+       val appStats = stats.firstOrNull {
+           it.packageName == currentApp
+       } ?: return
 
-            val isNightBlocked = rule.block_after_9pm && hour >= 21
+       val totalTime = appStats.totalTimeInForeground
 
-            val isHardBlocked = rule.blocked
+        val isOverLimit =
+            rule.daily_limit > 0 &&
+                    totalTime > rule.daily_limit
 
-            if (isHardBlocked) {
-                blockApp(pkg)
-                sendAppAlert(pkg, "Blocked by parent")
-                return@forEach
+        if (rule.blocked) {
+
+            //blockApp(currentApp)
+            blockApp(
+                currentApp,
+                "PARENT_BLOCK"
+            )
+
+            sendAppAlert(currentApp, "Blocked by parent")
+
+            return
+        }
+
+        if (inBlockedTime) {
+
+            //blockApp(currentApp)
+            blockApp(
+                currentApp,
+                "SCHEDULE"
+            )
+
+            sendAppAlert(currentApp, "Blocked by schedule")
+
+            return
+        }
+
+       // ---------------------------------------
+// APP ALLOWED TIME WINDOW
+// ---------------------------------------
+
+       if (outsideAllowedTime) {
+
+           val unlockTime = Calendar.getInstance().apply {
+
+               set(
+                   Calendar.HOUR_OF_DAY,
+                   rule.allowed_from_hour
+               )
+
+               set(
+                   Calendar.MINUTE,
+                   rule.allowed_from_minute
+               )
+
+               set(Calendar.SECOND, 0)
+               set(Calendar.MILLISECOND, 0)
+
+               if (timeInMillis <= System.currentTimeMillis()) {
+                   add(Calendar.DAY_OF_YEAR, 1)
+               }
+           }
+
+           blockApp(
+               currentApp,
+               "TIME_WINDOW",
+               unlockTime.timeInMillis
+           )
+
+           sendAppAlert(
+               currentApp,
+               "Outside allowed time"
+           )
+
+           return
+       }
+
+       if (rule.daily_limit > 0 && isOverLimit) {
+
+           val tomorrow = Calendar.getInstance().apply {
+               add(Calendar.DAY_OF_YEAR, 1)
+               set(Calendar.HOUR_OF_DAY, 0)
+               set(Calendar.MINUTE, 0)
+               set(Calendar.SECOND, 0)
+               set(Calendar.MILLISECOND, 0)
+           }
+
+           blockApp(
+               currentApp,
+               "LIMIT",
+               tomorrow.timeInMillis
+           )
+
+           sendAppAlert(
+               currentApp,
+               "Daily limit reached"
+           )
+
+           return
+       }
+        if (rule.block_after_9pm && hour >= 21) {
+
+           //blockApp(currentApp)
+            val morning = java.util.Calendar.getInstance().apply {
+
+                if (hour >= 21)
+                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+
+                set(java.util.Calendar.HOUR_OF_DAY, 6)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
             }
 
-            if (isBlockedTime) {
-                blockApp(pkg)
-                sendAppAlert(pkg, "Blocked by schedule")
-                return@forEach
-            }
+            blockApp(
+                currentApp,
+                "NIGHT",
+                morning.timeInMillis
+            )
 
-            if (isOverLimit && rule.block_after_limit) {
-                blockApp(pkg)
-                sendAppAlert(pkg, "Limit exceeded")
-                return@forEach
-            }
-
-            if (isNightBlocked) {
-                blockApp(pkg)
-                sendAppAlert(pkg, "Blocked after 9 PM")
-                return@forEach
-            }
+            sendAppAlert(currentApp, "Blocked after 9 PM")
         }
     }
-
-    private fun blockApp(packageName: String) {
+    /*private fun blockApp(packageName: String) {
         val intent = Intent(this, AppBlockOverlayActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -280,6 +420,29 @@ class ChildAppControlService : Service() {
         }
 
         intent.putExtra("blockedApp", packageName)
+        startActivity(intent)
+    }*/
+    private fun blockApp(
+        packageName: String,
+        reason: String,
+        endTime: Long = 0L
+    ) {
+        Log.e(
+            "BLOCK_FLOW",
+            "Launching overlay for $packageName reason=$reason"
+        )
+
+        val intent = Intent(this, AppBlockOverlayActivity::class.java).apply {
+
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+
+            putExtra("blockedApp", packageName)
+            putExtra("reason", reason)
+            putExtra("endTime", endTime)
+        }
+
         startActivity(intent)
     }
     private fun sendAppAlert(app: String, reason: String) {
@@ -301,6 +464,23 @@ class ChildAppControlService : Service() {
         )
 
         return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun getForegroundApp(): String? {
+
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+
+        val endTime = System.currentTimeMillis()
+
+        val stats = usm.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY,
+            endTime - 60_000,
+            endTime
+        )
+
+        if (stats.isNullOrEmpty()) return null
+
+        return stats.maxByOrNull { it.lastTimeUsed }?.packageName
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

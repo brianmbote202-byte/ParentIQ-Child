@@ -508,35 +508,42 @@ class MainActivity : AppCompatActivity() {
     //schedule app usage
     private fun scheduleUsageLoggingWorker(childId: String) {
 
+        val pm = packageManager
+
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val trackedApps = pm.queryIntentActivities(launcherIntent, 0)
+            .map { it.activityInfo.packageName }
+            .distinct()
+            .toTypedArray()
+
+        Log.d(
+            "USAGE_WORKER",
+            "Tracking ${trackedApps.size} installed apps"
+        )
+
         val data = workDataOf(
             "childId" to childId,
-            "trackedApps" to arrayOf(
-                "com.whatsapp",
-                "com.instagram.android",
-                "com.facebook.katana",
-                "com.snapchat.android",
-                "org.telegram.messenger",
-                "com.twitter.android",
-                "com.android.chrome",
-                "com.google.android.youtube"
+            "trackedApps" to trackedApps
+        )
+
+        val workRequest =
+            PeriodicWorkRequestBuilder<UsageLoggerWorker>(
+                15,
+                TimeUnit.MINUTES
             )
-        )
+                .setInputData(data)
+                .build()
 
-        val workRequest = PeriodicWorkRequestBuilder<UsageLoggerWorker>(
-            15, java.util.concurrent.TimeUnit.MINUTES
-        )
-            .setInputData(data)
-            .build()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "UsageLoggerWorker",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            workRequest
-        )
-
-        Log.d("USAGE_WORKER", "Periodic usage logging scheduled")
+        WorkManager.getInstance(this)
+            .enqueueUniquePeriodicWork(
+                "UsageLoggerWorker",
+                ExistingPeriodicWorkPolicy.UPDATE,
+                workRequest
+            )
     }
-
 
 
 

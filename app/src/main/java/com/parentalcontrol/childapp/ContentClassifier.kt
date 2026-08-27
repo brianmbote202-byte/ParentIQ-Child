@@ -22,10 +22,107 @@ object ContentClassifier2 {
     // -------------------------
     // Keyword fallbacks (existing)
     // -------------------------
-    private val adultKeywords = listOf("porn", "sex", "xxx", "hentai", "adult", "adult-site", "nsfw")
-    private val gamblingKeywords = listOf("bet", "casino", "gambling", "stake")
-    private val violenceKeywords = listOf("kill", "shoot", "gun", "fight", "murder")
-    private val drugsKeywords = listOf("cocaine", "meth", "weed", "marijuana", "drug")
+    // ========================================================
+// SEARCH / TEXT RISK KEYWORDS
+// ========================================================
+
+    // Explicit pornography
+    private val pornKeywords = listOf(
+        "porn",
+        "pornhub",
+        "xxx",
+        "xvideos",
+        "xnxx",
+        "brazzers",
+        "hentai",
+        "redtube",
+        "youporn",
+        "sex videos",
+        "porn videos"
+    )
+
+    // Sexual content / sexual searches
+    private val sexualKeywords = listOf(
+        "sex",
+        "sexual",
+        "nude",
+        "nudes",
+        "naked",
+        "onlyfans",
+        "escort",
+        "hookup",
+        "fetish",
+        "bdsm",
+        "nsfw",
+        "adult video",
+        "adult content"
+    )
+
+    // Religious-related searches
+    private val religiousKeywords = listOf(
+        "religion",
+        "religious",
+        "god",
+        "jesus",
+        "christian",
+        "christianity",
+        "church",
+        "bible",
+        "quran",
+        "allah",
+        "islam",
+        "muslim",
+        "hindu",
+        "hinduism",
+        "buddhist",
+        "buddhism",
+        "atheism",
+        "satan",
+        "satanism"
+    )
+
+    // Violence-related searches
+    private val violenceKeywords = listOf(
+        "kill",
+        "killing",
+        "shoot",
+        "shooting",
+        "gun",
+        "guns",
+        "fight",
+        "fighting",
+        "murder",
+        "stab",
+        "stabbing",
+        "bomb",
+        "attack",
+        "assault",
+        "war"
+    )
+
+    // Drug-related searches
+    private val drugsKeywords = listOf(
+        "cocaine",
+        "meth",
+        "methamphetamine",
+        "weed",
+        "marijuana",
+        "drug",
+        "drugs",
+        "heroin",
+        "ecstasy",
+        "mdma",
+        "crack cocaine",
+        "opioid"
+    )
+
+    // Keep your existing category
+    private val gamblingKeywords = listOf(
+        "bet",
+        "casino",
+        "gambling",
+        "stake"
+    )
 
     // -------------------------
     // TFLite model config (image classification)
@@ -35,6 +132,17 @@ object ContentClassifier2 {
     private const val MODEL_INPUT_SIZE = 224 // set to your model's expected size
     private const val MODEL_PIXEL_SIZE = 3
     private const val MODEL_BYTE_SIZE_PER_CHANNEL = 4 // float32
+
+    // ========================================================
+// SEARCH ALERT DEDUPLICATION
+// ========================================================
+
+    private var lastSearchAlertKey = ""
+
+    private var lastSearchAlertTime = 0L
+
+    private const val SEARCH_ALERT_COOLDOWN =
+        60_000L
 
     // Interpreter singleton must be initialized with a Context
     @Volatile
@@ -74,7 +182,13 @@ object ContentClassifier2 {
         }
 
         // 4️⃣ SUPER escalation:
-        if ("adult" in finalCategories && imageScore >= 0.7f) {
+        if (
+            (
+                    "porn" in finalCategories ||
+                            "sexual" in finalCategories
+                    ) &&
+            imageScore >= 0.7f
+        ) {
             finalScore = 100
         }
 
@@ -95,24 +209,72 @@ object ContentClassifier2 {
     // -------------------------
     // Public text / URL checks (fast)
     // -------------------------
-    fun urlFlag(url: String): String? {
-        val lower = url.lowercase()
+    fun urlFlag(text: String): String? {
+
+        val lower =
+            text
+                .lowercase()
+                .trim()
+
         return when {
-            adultKeywords.any { lower.contains(it) } -> "adult"
-            gamblingKeywords.any { lower.contains(it) } -> "gambling"
-            violenceKeywords.any { lower.contains(it) } -> "violence"
-            drugsKeywords.any { lower.contains(it) } -> "drugs"
-            else -> null
+
+            pornKeywords.any { lower.contains(it) } ->
+                "porn"
+
+            sexualKeywords.any { lower.contains(it) } ->
+                "sexual"
+
+            violenceKeywords.any { lower.contains(it) } ->
+                "violence"
+
+            drugsKeywords.any { lower.contains(it) } ->
+                "drugs"
+
+            religiousKeywords.any { lower.contains(it) } ->
+                "religious"
+
+            gamblingKeywords.any { lower.contains(it) } ->
+                "gambling"
+
+            else ->
+                null
         }
     }
 
     fun textFlags(text: String): Set<String> {
-        val lower = text.lowercase()
-        val flagged = mutableSetOf<String>()
-        if (adultKeywords.any { lower.contains(it) }) flagged.add("adult")
-        if (gamblingKeywords.any { lower.contains(it) }) flagged.add("gambling")
-        if (violenceKeywords.any { lower.contains(it) }) flagged.add("violence")
-        if (drugsKeywords.any { lower.contains(it) }) flagged.add("drugs")
+
+        val lower =
+            text
+                .lowercase()
+                .trim()
+
+        val flagged =
+            mutableSetOf<String>()
+
+        if (pornKeywords.any { lower.contains(it) }) {
+            flagged.add("porn")
+        }
+
+        if (sexualKeywords.any { lower.contains(it) }) {
+            flagged.add("sexual")
+        }
+
+        if (violenceKeywords.any { lower.contains(it) }) {
+            flagged.add("violence")
+        }
+
+        if (drugsKeywords.any { lower.contains(it) }) {
+            flagged.add("drugs")
+        }
+
+        if (religiousKeywords.any { lower.contains(it) }) {
+            flagged.add("religious")
+        }
+
+        if (gamblingKeywords.any { lower.contains(it) }) {
+            flagged.add("gambling")
+        }
+
         return flagged
     }
 
@@ -194,24 +356,61 @@ object ContentClassifier2 {
             }
         }
     }
-    fun analyzeTextRisk(text: String): RiskResult {
+    //======ANALYZE TEXTS RISKS=========
+    fun analyzeTextRisk(
+        text: String
+    ): RiskResult {
 
-        val categories = textFlags(text)
+        val categories =
+            textFlags(text)
+
         var score = 10
 
-        if ("adult" in categories) score = maxOf(score, 90)
-        if ("violence" in categories) score = maxOf(score, 80)
-        if ("drugs" in categories) score = maxOf(score, 75)
-        if ("gambling" in categories) score = maxOf(score, 60)
-
-        val level = when {
-            score >= 90 -> "critical"
-            score >= 75 -> "high"
-            score >= 50 -> "medium"
-            else -> "low"
+        if ("porn" in categories) {
+            score = maxOf(score, 95)
         }
 
-        return RiskResult(score, level, categories)
+        if ("sexual" in categories) {
+            score = maxOf(score, 90)
+        }
+
+        if ("violence" in categories) {
+            score = maxOf(score, 80)
+        }
+
+        if ("drugs" in categories) {
+            score = maxOf(score, 75)
+        }
+
+        if ("gambling" in categories) {
+            score = maxOf(score, 60)
+        }
+
+        if ("religious" in categories) {
+            score = maxOf(score, 20)
+        }
+
+        val level =
+            when {
+
+                score >= 90 ->
+                    "critical"
+
+                score >= 75 ->
+                    "high"
+
+                score >= 50 ->
+                    "medium"
+
+                else ->
+                    "low"
+            }
+
+        return RiskResult(
+            score = score,
+            level = level,
+            categories = categories
+        )
     }
 
     // -------------------------
