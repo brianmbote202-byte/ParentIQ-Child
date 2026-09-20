@@ -1,13 +1,11 @@
 package com.parentalcontrol.childapp.service
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ServerValue
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 class UsageLogger(
     private val context: Context,
@@ -15,219 +13,262 @@ class UsageLogger(
 ) {
 
     companion object {
+
         private const val TAG = "UsageLogger"
+
+        private const val SESSION_TAG =
+            "SESSION_WRITER"
     }
 
     // =========================================================
-    // BUFFER
-    // stores app usage in SECONDS
+    // SCREEN-TIME INTERVAL
+    //
+    // Represents real foreground usage:
+    //
+    // start -> end
+    //
+    // These intervals are used by UsageLoggerWorker to calculate
+    // total device screen time.
+    //
+    // IMPORTANT:
+    // UsageLogger does NOT calculate the final screen-time total.
+    // The Worker merges intervals from all tracked apps.
     // =========================================================
 
-    private val usageBuffer =
-        mutableMapOf<String, Int>()
-
-    private val handler =
-        Handler(Looper.getMainLooper())
-
-    // =========================================================
-    // AUTO FLUSH EVERY 2 MIN
-    // =========================================================
-
-    private val flushRunnable =
-        object : Runnable {
-
-            override fun run() {
-
-                flushToFirebase()
-
-                handler.postDelayed(
-                    this,
-                    2 * 60 * 1000
-                )
-            }
-        }
+    data class ScreenTimeInterval(
+        val start: Long,
+        val end: Long
+    )
 
     // =========================================================
-    // START LOGGER
+    // DATE
+    // =========================================================
+
+    private fun getTodayKey(): String {
+
+        return SimpleDateFormat(
+            "yyyy-MM-dd",
+            Locale.getDefault()
+        ).format(
+            Date()
+        )
+    }
+
+    // =========================================================
+    // START
+    //
+    // Kept for compatibility with existing code.
+    //
+    // There is no timer or screen-time buffer here.
     // =========================================================
 
     fun start() {
 
-        Log.d(TAG, "UsageLogger started")
-
-        handler.post(flushRunnable)
+        Log.d(
+            TAG,
+            "UsageLogger started for child=$childId"
+        )
     }
 
     // =========================================================
-    // STOP LOGGER
+    // STOP
+    //
+    // Kept for compatibility.
     // =========================================================
 
     fun stop() {
 
-        Log.d(TAG, "UsageLogger stopped")
-
-        handler.removeCallbacks(flushRunnable)
-
-        handler.removeCallbacksAndMessages(null)
-
-        usageBuffer.clear()
+        Log.d(
+            TAG,
+            "UsageLogger stopped"
+        )
     }
 
     // =========================================================
-    // LOG APP USAGE
+    // GET SCREEN-TIME INTERVALS
+    //
+    // IMPORTANT:
+    //
+    // This method provides the API expected by the Worker.
+    //
+    // Screen time means:
+    //
+    // "Time during which one of the tracked applications was
+    // actually in the foreground."
+    //
+    // This class does NOT add intervals from different apps.
+    //
+    // The Worker collects intervals from every tracked app and
+    // merges overlapping intervals.
+    //
+    // Example:
+    //
+    // Chrome:
+    // 10:00 -> 10:10
+    //
+    // YouTube:
+    // 10:05 -> 10:15
+    //
+    // This method returns both intervals.
+    //
+    // Worker merges them into:
+    //
+    // 10:00 -> 10:15
+    //
+    // Therefore screen time = 15 minutes, not 20.
     // =========================================================
 
+    fun getScreenTimeIntervals(
+        appPackage: String
+    ): List<ScreenTimeInterval> {
+
+        return try {
+
+            val tracker =
+                AppUsageTracker(
+                    context
+                )
+
+            val sessions =
+                tracker.getAppSessions(
+                    appPackage
+                )
+
+            val intervals =
+                sessions.mapNotNull { session ->
+
+                    val start =
+                        session["from"]
+
+                    val end =
+                        session["to"]
+
+                    if (
+                        start == null ||
+                        end == null ||
+                        end <= start
+                    ) {
+                        null
+                    } else {
+
+                        ScreenTimeInterval(
+                            start = start,
+                            end = end
+                        )
+                    }
+                }
+
+            Log.d(
+                TAG,
+                "Screen-time intervals for " +
+                        "$appPackage = ${intervals.size}"
+            )
+
+            intervals
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "Failed to get screen-time intervals for " +
+                        appPackage,
+                e
+            )
+
+            emptyList()
+        }
+    }
+
+    // =========================================================
+    // APP USAGE
+    //
+    // Retained for compatibility with older code.
+    //
+    // DO NOT use this to calculate the global screen-time total.
+    // =========================================================
+
+    @Deprecated(
+        message =
+            "Screen time is calculated by UsageLoggerWorker. " +
+                    "Use getScreenTimeIntervals() if intervals " +
+                    "are required.",
+        level = DeprecationLevel.WARNING
+    )
     fun logAppUsage(
         appPackage: String,
         usedSeconds: Int
     ) {
 
-        if (usedSeconds <= 0) return
-
-        val key =
-            appPackage.replace(".", "_")
-
-        val current =
-            usageBuffer[key] ?: 0
-
-        usageBuffer[key] =
-            current + usedSeconds
-
-        Log.d(
+        Log.w(
             TAG,
-            "Buffered -> $appPackage : $usedSeconds sec"
+            "Ignoring logAppUsage() for $appPackage " +
+                    "($usedSeconds sec). " +
+                    "Screen time is calculated by UsageLoggerWorker."
         )
     }
 
     // =========================================================
-    // FLUSH TO FIREBASE
+    // FLUSH
+    //
+    // Retained for compatibility.
     // =========================================================
 
+    @Deprecated(
+        message =
+            "Screen-time buffering has been removed. " +
+                    "UsageLoggerWorker writes screen time directly.",
+        level = DeprecationLevel.WARNING
+    )
     fun flushToFirebase() {
 
-        if (usageBuffer.isEmpty()) {
-
-            Log.d(TAG, "No usage to flush")
-
-            return
-        }
-
-        val calendar =
-            Calendar.getInstance()
-
-        val hour =
-            calendar.get(Calendar.HOUR_OF_DAY)
-
-        val dateKey =
-            SimpleDateFormat(
-                "yyyy-MM-dd",
-                Locale.getDefault()
-            ).format(Date())
-
-        // =====================================================
-        // TOTAL SCREEN TIME
-        // =====================================================
-
-        val totalSeconds =
-            usageBuffer.values.sum()
-
-        // =====================================================
-        // SAVE HOURLY SCREEN TIME
-        // screen_time/{childId}/daily/{date}/{hour}
-        // =====================================================
-
-        val hourlyRef =
-            FirebaseDatabase.getInstance()
-                .getReference("screen_time")
-                .child(childId)
-                .child("daily")
-                .child(dateKey)
-                .child(hour.toString())
-
-        hourlyRef.setValue(
-            ServerValue.increment(
-                totalSeconds.toLong()
-            )
-        ).addOnSuccessListener {
-
-            Log.d(
-                TAG,
-                "Hourly screen time saved successfully"
-            )
-        }.addOnFailureListener {
-
-            Log.e(
-                TAG,
-                "Failed saving hourly screen time"
-            )
-        }
-
-        // =====================================================
-        // SAVE DAILY TOTAL
-        // child_usage/{childId}/daily_stats/{date}
-        // =====================================================
-
-        val dailyRef =
-            FirebaseDatabase.getInstance()
-                .getReference("child_usage")
-                .child(childId)
-                .child("daily_stats")
-                .child(dateKey)
-                .child("totalScreenTime")
-
-        dailyRef.setValue(
-            ServerValue.increment(
-                totalSeconds.toLong()
-            )
-        )
-
         Log.d(
             TAG,
-            "Saved daily total: $totalSeconds sec"
+            "flushToFirebase() ignored. " +
+                    "Worker owns screen-time writes."
         )
-
-        // =====================================================
-        // CLEAR BUFFER
-        // =====================================================
-
-        usageBuffer.clear()
     }
 
     // =========================================================
-    // OPTIONAL:
-    // FORCE DAILY UPDATE
+    // DAILY SCREEN TIME
+    //
+    // Retained for compatibility.
+    //
+    // The Worker calculates the complete daily total and SETS
+    // it instead of incrementing it.
     // =========================================================
 
+    @Deprecated(
+        message =
+            "Daily screen time is now calculated by UsageLoggerWorker.",
+        level = DeprecationLevel.WARNING
+    )
     fun updateDailyScreenTime(
         incrementSeconds: Int
     ) {
 
-        if (incrementSeconds <= 0) return
-
-        val dateKey =
-            SimpleDateFormat(
-                "yyyy-MM-dd",
-                Locale.getDefault()
-            ).format(Date())
-
-        val ref =
-            FirebaseDatabase.getInstance()
-                .getReference("child_usage")
-                .child(childId)
-                .child("daily_stats")
-                .child(dateKey)
-                .child("totalScreenTime")
-
-        ref.setValue(
-            ServerValue.increment(
-                incrementSeconds.toLong()
-            )
+        Log.w(
+            TAG,
+            "Ignoring updateDailyScreenTime($incrementSeconds). " +
+                    "UsageLoggerWorker owns the daily total."
         )
     }
 
     // =========================================================
-    // OPTIONAL:
     // APP SESSIONS
+    //
+    // Firebase:
+    //
+    // child_usage
+    //   └── childId
+    //       └── app_sessions
+    //           └── yyyy-MM-dd
+    //               └── package_name
+    //                   └── session_start
+    //
+    // This stores individual application sessions.
+    //
+    // These sessions are separate from the global screen-time
+    // calculation.
     // =========================================================
 
     fun logAppSessions(
@@ -235,41 +276,159 @@ class UsageLogger(
         sessions: List<Map<String, Long>>
     ) {
 
-        Log.d(
-            "SESSION_WRITER",
-            "Package=$appPackage SessionCount=${sessions.size}"
-        )
+        if (sessions.isEmpty()) {
 
-        sessions.take(3).forEach {
             Log.d(
-                "SESSION_WRITER",
-                "Session=$it"
+                SESSION_TAG,
+                "No sessions for $appPackage"
             )
+
+            return
         }
 
-        if (sessions.isEmpty()) return
+        Log.d(
+            SESSION_TAG,
+            "=================================================="
+        )
+
+        Log.d(
+            SESSION_TAG,
+            "Saving app sessions"
+        )
+
+        Log.d(
+            SESSION_TAG,
+            "Child   = $childId"
+        )
+
+        Log.d(
+            SESSION_TAG,
+            "Package = $appPackage"
+        )
+
+        Log.d(
+            SESSION_TAG,
+            "Count   = ${sessions.size}"
+        )
+
+        Log.d(
+            SESSION_TAG,
+            "=================================================="
+        )
 
         val dateKey =
-            SimpleDateFormat(
-                "yyyy-MM-dd",
-                Locale.getDefault()
-            ).format(Date())
+            getTodayKey()
+
+        // =====================================================
+        // FIREBASE-SAFE PACKAGE NAME
+        // =====================================================
+
+        val safePackage =
+            appPackage.replace(
+                ".",
+                "_"
+            )
 
         val ref =
-            FirebaseDatabase.getInstance()
+            FirebaseDatabase
+                .getInstance()
                 .getReference("child_usage")
                 .child(childId)
                 .child("app_sessions")
                 .child(dateKey)
-                .child(appPackage.replace(".", "_"))
+                .child(safePackage)
+
+        // =====================================================
+        // SAVE EACH SESSION
+        // =====================================================
 
         sessions.forEach { session ->
 
             val from =
-                session["from"] ?: return@forEach
+                session["from"]
 
-            ref.child(from.toString())
-                .setValue(session)
+            val to =
+                session["to"]
+
+            val durationSeconds =
+                session["durationSeconds"]
+
+            if (
+                from == null ||
+                to == null ||
+                durationSeconds == null
+            ) {
+
+                Log.w(
+                    SESSION_TAG,
+                    "Skipping malformed session -> $session"
+                )
+
+                return@forEach
+            }
+
+            if (to <= from) {
+
+                Log.w(
+                    SESSION_TAG,
+                    "Skipping invalid session -> " +
+                            "$from -> $to"
+                )
+
+                return@forEach
+            }
+
+            if (durationSeconds <= 0) {
+
+                Log.w(
+                    SESSION_TAG,
+                    "Skipping zero-duration session -> " +
+                            "$session"
+                )
+
+                return@forEach
+            }
+
+            // =================================================
+            // SESSION KEY
+            //
+            // Using the foreground start timestamp means that
+            // repeated Worker executions update the same session
+            // instead of creating another session.
+            // =================================================
+
+            val sessionRef =
+                ref.child(
+                    from.toString()
+                )
+
+            sessionRef
+                .setValue(
+                    mapOf(
+                        "from" to from,
+                        "to" to to,
+                        "durationSeconds" to durationSeconds
+                    )
+                )
+                .addOnSuccessListener {
+
+                    Log.d(
+                        SESSION_TAG,
+                        "✅ Session saved -> " +
+                                "$appPackage / " +
+                                "$from -> $to / " +
+                                "${durationSeconds}s"
+                    )
+                }
+                .addOnFailureListener { error ->
+
+                    Log.e(
+                        SESSION_TAG,
+                        "❌ Session save failed -> " +
+                                "$appPackage / $from",
+                        error
+                    )
+                }
         }
     }
 }

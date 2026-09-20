@@ -748,6 +748,15 @@ class ChildLocationService : Service() {
         }
 
         // ---------------------------------------------------------
+// 16. CHECK GEOFENCES
+// ---------------------------------------------------------
+        geofenceManager.checkGeofences(
+            childId = id,
+            currentLat = location.latitude,
+            currentLng = location.longitude
+        )
+
+        // ---------------------------------------------------------
         // 16. Debug
         // ---------------------------------------------------------
         Log.d(
@@ -838,7 +847,7 @@ class ChildLocationService : Service() {
 
                             name,
 
-                            "exited",
+                            "entered",
 
                             currentLat,
 
@@ -855,6 +864,14 @@ class ChildLocationService : Service() {
                     else if (!inside && previousState != false) {
 
                         geofenceStates[geofenceKey] = false
+
+                        sendGeofenceAlert(
+                            childId,
+                            name,
+                            "exited",
+                            currentLat,
+                            currentLng
+                        )
 
                         updateGeofenceStatus(
                             childId,

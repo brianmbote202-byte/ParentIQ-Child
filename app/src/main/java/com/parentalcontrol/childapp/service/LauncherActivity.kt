@@ -12,6 +12,8 @@ import androidx.work.*
 import java.util.concurrent.TimeUnit
 import com.parentalcontrol.childapp.worker.ServiceHealthWorker
 import com.parentalcontrol.childapp.service.ChildAppControlService
+import android.content.ComponentName
+import android.content.pm.PackageManager
 
 class LauncherActivity : AppCompatActivity() {
 
@@ -279,5 +281,26 @@ class LauncherActivity : AppCompatActivity() {
                 ExistingPeriodicWorkPolicy.UPDATE,
                 workRequest
             )
+    }
+
+    //==============HIDE APP ICON======
+    private fun hideLauncherIcon() {
+        try {
+            val component = ComponentName(
+                this,
+                LauncherActivity::class.java
+            )
+
+            packageManager.setComponentEnabledSetting(
+                component,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+
+            Log.e(TAG, "Launcher icon disabled")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to hide launcher icon", e)
+        }
     }
 }

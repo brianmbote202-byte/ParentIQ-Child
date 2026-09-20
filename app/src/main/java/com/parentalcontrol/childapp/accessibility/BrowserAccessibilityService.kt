@@ -15,7 +15,12 @@ import com.parentalcontrol.childapp.tracker.NavigationEvent
 import com.parentalcontrol.childapp.utils.TitleSanitizer
 import com.parentalcontrol.childapp.utils.UrlQueryExtractor
 import android.view.KeyEvent
+import com.google.firebase.database.DatabaseError
 import java.util.Locale
+
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 
 @SuppressLint("AccessibilityService", "AccessibilityPolicy")
 class BrowserAccessibilityService : AccessibilityService() {
@@ -32,7 +37,7 @@ class BrowserAccessibilityService : AccessibilityService() {
 
         private const val SEARCH_REPEAT_COOLDOWN = 5000L
 
-        private const val NATIVE_SEARCH_DUPLICATE_WINDOW = 5_000L
+        private const val NATIVE_SEARCH_DUPLICATE_WINDOW = 15_000L
 
 
         private const val MIN_SEARCH_LENGTH = 3
@@ -88,6 +93,9 @@ class BrowserAccessibilityService : AccessibilityService() {
 
         private const val MAX_TREE_DEPTH = 45
 
+        //==========MAXIMUM TREE NODES=====
+        private const val MAX_TREE_NODES = 1200
+
         // ====================================================
         // SEARCH CONFIDENCE
         // ====================================================
@@ -101,7 +109,76 @@ class BrowserAccessibilityService : AccessibilityService() {
         private const val EVENT_QUERY_COOLDOWN = 1200L
 
 
+
+        // ====================================================
+// EVENT FLOOD PROTECTION
+// ====================================================
+
+        private const val EVENT_THROTTLE_MS = 120L
+
+
     }
+
+    // ========================================================
+// DYNAMIC BROWSER PACKAGES
+//
+// Loaded from Firebase installed_apps where:
+//
+// category = "browser"
+//
+// This avoids hardcoding Chrome, Firefox, Opera, etc.
+// ========================================================
+
+    private val browserPackages =
+        mutableSetOf<String>()
+
+    // ========================================================
+// DYNAMIC APP CATEGORIES
+// ========================================================
+//
+// Loaded from Firebase:
+//
+// app_categories/
+//     <firebase-key>/
+//         appName
+//         category
+//         packageName
+//
+// Example:
+//
+// TikTok Lite
+//     category = social_media
+//
+// Opera Mini
+//     category = browser
+//
+// YouTube Go
+//     category = streaming
+//
+// The package -> category mapping is used to decide
+// whether a search is a meaningful behavioral search.
+//
+// ========================================================
+
+    private val appCategories =
+        mutableMapOf<String, String>()
+
+    // ========================================================
+// SEARCH-ELIGIBLE APP CATEGORIES
+// ========================================================
+//
+// Only these categories represent apps where a user's
+// search is meaningful for behavioral/search analytics.
+//
+// Everything else is ignored.
+//
+// ========================================================
+
+    private val SEARCH_ELIGIBLE_CATEGORIES = setOf(
+        "browser",
+        "social_media",
+        "streaming"
+    )
 
 
     // Last search that was actually saved to Firebase
@@ -109,9 +186,20 @@ class BrowserAccessibilityService : AccessibilityService() {
     private var lastSavedNativeSearchPackage: String? = null
     private var lastSavedNativeSearchTime: Long = 0L
 
+    private var lastProcessedEventTime = 0L
+    private var lastProcessedEventPackage = ""
+
+
+
+
+    private var browserCategoriesLoaded =
+        false
+
     private val prefs by lazy {
         getSharedPreferences("child_prefs", MODE_PRIVATE)
     }
+
+
 
     private var childId: String = ""
 
@@ -408,15 +496,10 @@ class BrowserAccessibilityService : AccessibilityService() {
 
         super.onServiceConnected()
 
-        Log.e(
-            TAG,
-            "=================================================="
-        )
-
-        Log.e(
-            TAG,
-            "🔥🔥🔥 BROWSER ACCESSIBILITY SERVICE CONNECTED 🔥🔥🔥"
-        )
+        Log.e(TAG, "==================================================")
+        Log.e(TAG, "🔥🔥🔥 BROWSER ACCESSIBILITY SERVICE CONNECTED 🔥🔥🔥")
+        Log.e(TAG, "🔥 Service instance = ${this.hashCode()}")
+        Log.e(TAG, "==================================================")
 
         try {
 
@@ -446,10 +529,7 @@ class BrowserAccessibilityService : AccessibilityService() {
                                 AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
                 }
 
-            Log.e(
-                TAG,
-                "✅ SERVICE INFO CONFIGURED"
-            )
+            Log.e(TAG, "✅ SERVICE INFO CONFIGURED")
 
 
             // ====================================================
@@ -462,10 +542,8 @@ class BrowserAccessibilityService : AccessibilityService() {
                     ?.trim()
                     .orEmpty()
 
-            Log.e(
-                TAG,
-                "🔑 Loaded childId = [$childId]"
-            )
+            Log.e(TAG, "🔑 Loaded childId = [$childId]")
+            Log.e(TAG, "🔑 childId blank = ${childId.isBlank()}")
 
 
             // ====================================================
@@ -474,124 +552,193 @@ class BrowserAccessibilityService : AccessibilityService() {
 
             if (childId.isBlank()) {
 
-                Log.e(
-                    TAG,
-                    "❌ CHILD ID IS EMPTY"
-                )
-
-                Log.e(
-                    TAG,
-                    "❌ BrowsingTracker will NOT be initialized"
-                )
-
-                Log.e(
-                    TAG,
-                    "⚠️ Make sure pairing saves child_id into"
-                )
-
-                Log.e(
-                    TAG,
-                    "⚠️ SharedPreferences: child_prefs"
-                )
-
-                Log.e(
-                    TAG,
-                    "=================================================="
-                )
+                Log.e(TAG, "❌ CHILD ID IS EMPTY")
+                Log.e(TAG, "❌ BrowsingTracker will NOT be initialized")
+                Log.e(TAG, "⚠️ Pairing must save child_id")
+                Log.e(TAG, "⚠️ SharedPreferences file = child_prefs")
+                Log.e(TAG, "⚠️ Preference key = child_id")
+                Log.e(TAG, "==================================================")
 
                 return
             }
 
 
             // ====================================================
-            // 4. DESTROY OLD TRACKER
+            // 4. DESTROY OLD TRACKER SAFELY
             // ====================================================
 
-            browsingTracker?.let {
+            val oldTracker = browsingTracker
+
+            if (oldTracker != null) {
+
+                Log.e(TAG, "🧹 Existing BrowsingTracker found")
+                Log.e(TAG, "🧹 Destroying old tracker")
 
                 try {
 
-                    it.destroy()
+                    oldTracker.destroy()
 
-                    Log.d(
-                        TAG,
-                        "🧹 Previous BrowsingTracker destroyed"
-                    )
+                    Log.e(TAG, "✅ Previous BrowsingTracker destroyed")
 
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
 
                     Log.e(
                         TAG,
-                        "⚠️ Failed to destroy previous tracker",
+                        "⚠️ Previous BrowsingTracker destroy failed",
                         e
                     )
                 }
+            } else {
+
+                Log.e(TAG, "ℹ️ No previous BrowsingTracker")
             }
 
             browsingTracker = null
 
+            Log.e(TAG, "🧹 browsingTracker cleared before recreation")
+            Log.e(TAG, "📡 Tracker currently = ${browsingTracker != null}")
+
 
             // ====================================================
-            // 5. CREATE BROWSING TRACKER
+            // 5. CREATE NEW BROWSING TRACKER
             // ====================================================
 
-            browsingTracker =
-                BrowsingTracker(
-                    context = applicationContext,
-                    childId = childId,
-                    accessibilityService = this
+            Log.e(TAG, "==================================================")
+            Log.e(TAG, "🟡 ABOUT TO CREATE BrowsingTracker")
+            Log.e(TAG, "🟡 childId = [$childId]")
+            Log.e(TAG, "🟡 childId length = ${childId.length}")
+            Log.e(TAG, "🟡 applicationContext = ${applicationContext != null}")
+            Log.e(TAG, "🟡 service instance = ${this.hashCode()}")
+            Log.e(TAG, "==================================================")
+
+
+            try {
+
+                val newTracker =
+                    BrowsingTracker(
+                        context = applicationContext,
+                        childId = childId,
+                        accessibilityService = this
+                    )
+
+                // ------------------------------------------------
+                // Constructor completed successfully
+                // ------------------------------------------------
+
+                Log.e(TAG, "🟢 BrowsingTracker CONSTRUCTOR COMPLETED")
+
+                browsingTracker = newTracker
+
+                Log.e(TAG, "🟢 BrowsingTracker ASSIGNED")
+                Log.e(TAG, "🟢 Tracker = ${browsingTracker != null}")
+
+            } catch (e: Throwable) {
+
+                Log.e(TAG, "==================================================")
+                Log.e(TAG, "🔴 BrowsingTracker CONSTRUCTOR FAILED")
+                Log.e(TAG, "🔴 Exception type = ${e::class.java.name}")
+                Log.e(TAG, "🔴 Exception message = ${e.message}")
+                Log.e(TAG, "🔴 Tracker = ${browsingTracker != null}")
+                Log.e(TAG, "==================================================")
+
+                Log.e(
+                    TAG,
+                    "🔴 FULL BrowsingTracker CONSTRUCTOR STACK TRACE",
+                    e
                 )
 
-            Log.e(
-                TAG,
-                "=================================================="
-            )
+                browsingTracker = null
+
+                Log.e(TAG, "🔴 Tracker cleared after constructor failure")
+
+                return
+            }
+
+
+            // ====================================================
+            // 5.1 VERIFY TRACKER BEFORE CONTINUING
+            // ====================================================
+
+            if (browsingTracker == null) {
+
+                Log.e(TAG, "❌ CRITICAL: Tracker is NULL after assignment")
+                Log.e(TAG, "❌ Browser package loading will NOT continue")
+                Log.e(TAG, "==================================================")
+
+                return
+            }
+
+            Log.e(TAG, "✅ Tracker verification passed")
+            Log.e(TAG, "📡 Tracker = ${browsingTracker != null}")
+
+
+            // ====================================================
+            // 5.2 LOAD BROWSER PACKAGES
+            // ====================================================
+
+            Log.e(TAG, "==================================================")
+            Log.e(TAG, "🌐 Starting dynamic browser package loading")
+            Log.e(TAG, "🌐 childId = [$childId]")
+            Log.e(TAG, "==================================================")
+
+            try {
+
+                loadBrowserPackages()
+
+                Log.e(TAG, "🌐 Dynamic browser package loading requested")
+
+                loadAppCategories()
+
+                Log.e(
+                    TAG,
+                    "🏷️ Dynamic app category loading requested"
+                )
+
+            } catch (e: Throwable) {
+
+                Log.e(
+                    TAG,
+                    "❌ Browser package loading failed",
+                    e
+                )
+            }
+
+
+            // ====================================================
+            // 6. FINAL INITIALIZATION CHECK
+            // ====================================================
+
+            Log.e(TAG, "==================================================")
+            Log.e(TAG, "✅ BROWSER ACCESSIBILITY INITIALIZATION COMPLETE")
+            Log.e(TAG, "📦 childId = [$childId]")
+            Log.e(TAG, "📡 Tracker = ${browsingTracker != null}")
+            Log.e(TAG, "🔥 Service instance = ${this.hashCode()}")
+            Log.e(TAG, "==================================================")
+
+
+        } catch (e: Throwable) {
+
+            // ====================================================
+            // GLOBAL INITIALIZATION FAILURE
+            // ====================================================
+
+            Log.e(TAG, "==================================================")
+            Log.e(TAG, "❌ BROWSER ACCESSIBILITY INITIALIZATION FAILED")
+            Log.e(TAG, "❌ Exception type = ${e::class.java.name}")
+            Log.e(TAG, "❌ Exception message = ${e.message}")
+            Log.e(TAG, "❌ Service instance = ${this.hashCode()}")
+            Log.e(TAG, "==================================================")
 
             Log.e(
                 TAG,
-                "✅ BROWSING TRACKER INITIALIZED"
-            )
-
-            Log.e(
-                TAG,
-                "📦 childId = [$childId]"
-            )
-
-            Log.e(
-                TAG,
-                "📡 Tracker = ${browsingTracker != null}"
-            )
-
-            Log.e(
-                TAG,
-                "=================================================="
-            )
-
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "=================================================="
-            )
-
-            Log.e(
-                TAG,
-                "❌ BROWSER ACCESSIBILITY INITIALIZATION FAILED"
-            )
-
-            Log.e(
-                TAG,
-                "❌ ${e.message}",
+                "❌ FULL ACCESSIBILITY INITIALIZATION STACK TRACE",
                 e
             )
 
             browsingTracker = null
 
-            Log.e(
-                TAG,
-                "=================================================="
-            )
+            Log.e(TAG, "❌ browsingTracker = null")
+            Log.e(TAG, "==================================================")
         }
     }
     //================SAVE THE PENDING SEARCH=============
@@ -867,6 +1014,69 @@ class BrowserAccessibilityService : AccessibilityService() {
                 return
             }
 
+            // ========================================================
+// 9.5 — NATIVE SEARCH DUPLICATE CHECK
+// ========================================================
+//
+// Accessibility can report the same submitted search
+// multiple times.
+//
+// Example:
+//
+// Chrome → "how to make eggs"
+//        ↓
+// result screen event
+//        ↓
+// content changed event
+//        ↓
+// focus/window event
+//
+// These must NOT become multiple Firebase records.
+//
+// ========================================================
+
+            if (
+                isDuplicateNativeSearch(
+                    query = cleanQuery,
+                    packageName = packageName
+                )
+            ) {
+
+                Log.d(
+                    TAG,
+                    "=========================================="
+                )
+
+                Log.d(
+                    TAG,
+                    "🔁 DUPLICATE SEARCH BLOCKED"
+                )
+
+                Log.d(
+                    TAG,
+                    "📦 Package = [$packageName]"
+                )
+
+                Log.d(
+                    TAG,
+                    "🔎 Query = [$cleanQuery]"
+                )
+
+                Log.d(
+                    TAG,
+                    "🚫 Firebase write will NOT happen"
+                )
+
+                Log.d(
+                    TAG,
+                    "=========================================="
+                )
+
+                clearPendingSearch()
+
+                return
+            }
+
 
             // ========================================================
             // 10. SAVE
@@ -907,6 +1117,46 @@ class BrowserAccessibilityService : AccessibilityService() {
                 query = cleanQuery,
                 packageName = packageName,
                 reason = reason
+            )
+            // ========================================================
+// REMEMBER LAST ACCEPTED SEARCH
+// ========================================================
+//
+// This must happen AFTER the search has passed all
+// validation and has been dispatched to BrowsingTracker.
+//
+// It allows the next accessibility event to recognize
+// the same search as a duplicate.
+//
+// ========================================================
+
+            lastSavedNativeSearchQuery =
+                cleanQuery
+
+            lastSavedNativeSearchPackage =
+                packageName
+
+            lastSavedNativeSearchTime =
+                System.currentTimeMillis()
+
+            Log.d(
+                TAG,
+                "🧠 Native search dedup state updated"
+            )
+
+            Log.d(
+                TAG,
+                "🔎 Last query = [$lastSavedNativeSearchQuery]"
+            )
+
+            Log.d(
+                TAG,
+                "📦 Last package = [$lastSavedNativeSearchPackage]"
+            )
+
+            Log.d(
+                TAG,
+                "⏱ Last time = [$lastSavedNativeSearchTime]"
             )
 
 
@@ -1868,7 +2118,39 @@ class BrowserAccessibilityService : AccessibilityService() {
                 return
             }
 
+
             val eventType = event.eventType
+
+            // ========================================================
+// EVENT FLOOD PROTECTION
+//
+// Old devices can receive a very large number of
+// accessibility events from Chrome, YouTube, TikTok, etc.
+//
+// We still process all important event types, but prevent
+// identical high-frequency event streams from overwhelming
+// the service.
+// ========================================================
+
+            val now = System.currentTimeMillis()
+
+            val highVolumeEvent =
+                eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+
+            if (highVolumeEvent) {
+
+                if (
+                    packageName == lastProcessedEventPackage &&
+                    now - lastProcessedEventTime < EVENT_THROTTLE_MS
+                ) {
+                    return
+                }
+
+                lastProcessedEventPackage = packageName
+                lastProcessedEventTime = now
+            }
 
             // ========================================================
             // 2. ONLY PROCESS EVENTS THAT CAN ACTUALLY HELP US
@@ -2428,8 +2710,8 @@ class BrowserAccessibilityService : AccessibilityService() {
                     cleanUrl
                 )
 
-            val now =
-                System.currentTimeMillis()
+            //val now =
+                //System.currentTimeMillis()
 
             val duplicateNavigation =
                 dispatchKey == lastDispatchedKey &&
@@ -3007,6 +3289,9 @@ class BrowserAccessibilityService : AccessibilityService() {
             var resultLikeNodeFound = false
 
 
+
+            var scannedNodes = 0
+
             fun scanUi(
                 node: AccessibilityNodeInfo?,
                 depth: Int = 0
@@ -3015,11 +3300,13 @@ class BrowserAccessibilityService : AccessibilityService() {
                 if (
                     node == null ||
                     depth > MAX_TREE_DEPTH ||
+                    scannedNodes >= MAX_TREE_NODES ||
                     queryFoundInUi && resultLikeNodeFound
                 ) {
-
                     return
                 }
+
+                scannedNodes++
 
 
                 val nodeText =
@@ -3464,38 +3751,530 @@ class BrowserAccessibilityService : AccessibilityService() {
             return false
         }
     }
-    //check if its a browser-----
+
+
+// CHECK IF PACKAGE IS A BROWSER
+//
+// Browser packages are loaded dynamically from Firebase:
+//
+// installed_apps/
+//      childId/
+//          packageName/
+//              category = "browser"
+//
+// No browser package names are hardcoded here.
+// ========================================================
+
     private fun isBrowserPackage(
         packageName: String
     ): Boolean {
 
-        val pkg =
+        val normalizedPackage =
             packageName
                 .trim()
                 .lowercase()
 
-        // ----------------------------------------------------
-        // Known browsers
-        // ----------------------------------------------------
 
-        if (browserApps.contains(pkg)) {
-            return true
+        if (
+            normalizedPackage.isBlank()
+        ) {
+            return false
         }
 
-        // ----------------------------------------------------
-        // Browser package-name hints
-        // ----------------------------------------------------
 
-        return pkg.contains("browser") ||
-                pkg.contains("firefox") ||
-                pkg.contains("chrome") ||
-                pkg.contains("opera") ||
-                pkg.contains("brave") ||
-                pkg.contains("vivaldi") ||
-                pkg.contains("duckduckgo") ||
-                pkg.contains("kiwi")
+        val isBrowser =
+            browserPackages.any {
+
+                it.equals(
+                    normalizedPackage,
+                    ignoreCase = true
+                )
+            }
+
+
+        Log.d(
+            TAG,
+            "🌐 Browser check: $normalizedPackage = $isBrowser"
+        )
+
+
+        return isBrowser
     }
 
+    // ========================================================
+// LOAD BROWSER PACKAGES FROM INSTALLED APPS
+//
+// Finds every installed app whose:
+//
+// category == "browser"
+//
+// The packages are stored in memory for fast lookup during
+// Accessibility events.
+// ========================================================
+
+    private fun loadBrowserPackages() {
+
+        if (childId.isBlank()) {
+
+            Log.e(
+                TAG,
+                "❌ Cannot load browser packages: childId is empty"
+            )
+
+            return
+        }
+
+        Log.d(
+            TAG,
+            "=========================================="
+        )
+
+        Log.d(
+            TAG,
+            "🌐 LOADING DYNAMIC BROWSER PACKAGES"
+        )
+
+        Log.d(
+            TAG,
+            "Child ID = $childId"
+        )
+
+        FirebaseDatabase
+            .getInstance()
+            .getReference("installed_apps")
+            .child(childId)
+            .addValueEventListener(
+                object : ValueEventListener {
+
+                    override fun onDataChange(
+                        snapshot: DataSnapshot
+                    ) {
+
+
+                        Log.e(
+                            TAG,
+                            "=========================================="
+                        )
+
+                        Log.e(
+                            TAG,
+                            "🔥 FIREBASE INSTALLED_APPS CALLBACK RECEIVED"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "📦 Child ID = [$childId]"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "📊 Snapshot exists = ${snapshot.exists()}"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "📊 Snapshot children count = ${snapshot.childrenCount}"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "📊 Snapshot value = ${snapshot.value}"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "=========================================="
+                        )
+
+                        val newBrowserPackages =
+                            mutableSetOf<String>()
+
+                        for (
+                        appSnapshot in snapshot.children
+                        ) {
+
+                            Log.d(
+                                TAG,
+                                "🔎 Inspecting installed app"
+                            )
+
+                            Log.d(
+                                TAG,
+                                "Firebase key = ${appSnapshot.key}"
+                            )
+
+                            Log.d(
+                                TAG,
+                                "Firebase value = ${appSnapshot.value}"
+                            )
+
+                            try {
+
+                                // =================================================
+                                // CATEGORY
+                                //
+                                // We ONLY use the installed_apps category.
+                                // No package-name guessing.
+                                // =================================================
+
+                                val category =
+                                    appSnapshot
+                                        .child("category")
+                                        .getValue(String::class.java)
+                                        ?.trim()
+                                        ?.lowercase()
+                                        .orEmpty()
+
+                                Log.d(
+                                    TAG,
+                                    "🏷️ Firebase category = [$category]"
+                                )
+
+
+                                // =================================================
+                                // ONLY BROWSER CATEGORY
+                                // =================================================
+
+                                if (category != "browser") {
+
+                                    continue
+                                }
+
+
+                                // =================================================
+                                // PACKAGE NAME
+                                //
+                                // Your Firebase structure contains:
+                                //
+                                // packageName = "com.android.chrome"
+                                //
+                                // We use this field directly.
+                                // =================================================
+
+                                val packageName =
+                                    appSnapshot
+                                        .child("packageName")
+                                        .getValue(String::class.java)
+                                        ?.trim()
+                                        ?.lowercase()
+                                        .orEmpty()
+
+
+                                if (packageName.isBlank()) {
+
+                                    Log.w(
+                                        TAG,
+                                        "⚠️ Browser app has no packageName: ${appSnapshot.key}"
+                                    )
+
+                                    continue
+                                }
+
+
+                                // =================================================
+                                // ADD BROWSER
+                                // =================================================
+
+                                newBrowserPackages.add(
+                                    packageName
+                                )
+
+
+                                Log.d(
+                                    TAG,
+                                    "✅ Browser loaded dynamically"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "Firebase key = ${appSnapshot.key}"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "Package = $packageName"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "Category = $category"
+                                )
+
+                            } catch (
+                                e: Exception
+                            ) {
+
+                                Log.e(
+                                    TAG,
+                                    "❌ Failed reading installed app: ${appSnapshot.key}",
+                                    e
+                                )
+                            }
+                        }
+
+
+                        // =========================================================
+                        // UPDATE IN-MEMORY BROWSER SET
+                        // =========================================================
+
+                        Log.e(
+                            TAG,
+                            "🧠 Updating in-memory browser packages"
+                        )
+
+                        Log.e(
+                            TAG,
+                            "🌐 New browser packages = $newBrowserPackages"
+                        )
+
+                        synchronized(browserPackages) {
+
+                            browserPackages.clear()
+
+                            browserPackages.addAll(
+                                newBrowserPackages
+                            )
+                        }
+
+                        Log.e(
+                            TAG,
+                            "🧠 Current browserPackages = $browserPackages"
+                        )
+
+                        browserCategoriesLoaded = true
+
+
+                        // =========================================================
+                        // RESULT
+                        // =========================================================
+
+                        Log.d(
+                            TAG,
+                            "=========================================="
+                        )
+
+                        Log.d(
+                            TAG,
+                            "🌐 BROWSER PACKAGE LOAD COMPLETE"
+                        )
+
+                        Log.d(
+                            TAG,
+                            "Total browsers = ${newBrowserPackages.size}"
+                        )
+
+                        newBrowserPackages.forEach { pkg ->
+
+                            Log.d(
+                                TAG,
+                                "🌐 Browser = $pkg"
+                            )
+                        }
+
+                        Log.d(
+                            TAG,
+                            "=========================================="
+                        )
+                    }
+
+
+                    override fun onCancelled(
+                        error: DatabaseError
+                    ) {
+
+                        browserCategoriesLoaded = false
+
+                        Log.e(
+                            TAG,
+                            "❌ Failed to load browser packages",
+                            error.toException()
+                        )
+                    }
+                }
+            )
+    }
+
+    // ========================================================
+// LOAD APP CATEGORIES FROM FIREBASE
+// ========================================================
+//
+// Firebase structure:
+//
+// app_categories/
+//     com_zhiliaoapp_musically_go/
+//         appName = "TikTok Lite"
+//         category = "social_media"
+//         packageName = "com.zhiliaoapp.musically.go"
+//
+// We use packageName as the lookup key.
+//
+// ========================================================
+
+    private fun loadAppCategories() {
+
+        Log.d(
+            TAG,
+            "=========================================="
+        )
+
+        Log.d(
+            TAG,
+            "🏷️ LOADING APP CATEGORIES"
+        )
+
+        FirebaseDatabase
+            .getInstance()
+            .getReference("app_categories")
+            .addValueEventListener(
+                object : ValueEventListener {
+
+                    override fun onDataChange(
+                        snapshot: DataSnapshot
+                    ) {
+
+                        val newCategories =
+                            mutableMapOf<String, String>()
+
+                        Log.d(
+                            TAG,
+                            "=========================================="
+                        )
+
+                        Log.d(
+                            TAG,
+                            "🏷️ APP CATEGORIES CALLBACK"
+                        )
+
+                        Log.d(
+                            TAG,
+                            "📊 Exists = ${snapshot.exists()}"
+                        )
+
+                        Log.d(
+                            TAG,
+                            "📊 Count = ${snapshot.childrenCount}"
+                        )
+
+
+                        for (
+                        appSnapshot in snapshot.children
+                        ) {
+
+                            try {
+
+                                val packageName =
+                                    appSnapshot
+                                        .child("packageName")
+                                        .getValue(String::class.java)
+                                        ?.trim()
+                                        ?.lowercase()
+                                        .orEmpty()
+
+                                val category =
+                                    appSnapshot
+                                        .child("category")
+                                        .getValue(String::class.java)
+                                        ?.trim()
+                                        ?.lowercase()
+                                        .orEmpty()
+
+                                val appName =
+                                    appSnapshot
+                                        .child("appName")
+                                        .getValue(String::class.java)
+                                        ?.trim()
+                                        .orEmpty()
+
+
+                                if (
+                                    packageName.isBlank() ||
+                                    category.isBlank()
+                                ) {
+                                    continue
+                                }
+
+
+                                newCategories[
+                                    packageName
+                                ] = category
+
+
+                                Log.d(
+                                    TAG,
+                                    "🏷️ App category loaded"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "📱 App = $appName"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "📦 Package = $packageName"
+                                )
+
+                                Log.d(
+                                    TAG,
+                                    "🏷️ Category = $category"
+                                )
+
+                            } catch (e: Exception) {
+
+                                Log.e(
+                                    TAG,
+                                    "❌ Failed reading app category: ${appSnapshot.key}",
+                                    e
+                                )
+                            }
+                        }
+
+
+                        synchronized(appCategories) {
+
+                            appCategories.clear()
+
+                            appCategories.putAll(
+                                newCategories
+                            )
+                        }
+
+
+                        Log.d(
+                            TAG,
+                            "=========================================="
+                        )
+
+                        Log.d(
+                            TAG,
+                            "🏷️ APP CATEGORY LOAD COMPLETE"
+                        )
+
+                        Log.d(
+                            TAG,
+                            "📊 Total categories = ${newCategories.size}"
+                        )
+
+                        Log.d(
+                            TAG,
+                            "=========================================="
+                        )
+                    }
+
+
+                    override fun onCancelled(
+                        error: DatabaseError
+                    ) {
+
+                        Log.e(
+                            TAG,
+                            "❌ Failed to load app categories",
+                            error.toException()
+                        )
+                    }
+                }
+            )
+    }
 
 
     // ========================================================
@@ -3516,20 +4295,49 @@ class BrowserAccessibilityService : AccessibilityService() {
             Log.d(TAG, "🔥 Event text = ${event.text}")
 
             // ============================================================
-            // STEP 0 — IGNORE ONLY SYSTEM / NON-SEARCH PACKAGES
-            //
-            // DO NOT hard-code social-media apps here.
-            //
-            // TikTok
-            // TikTok Lite
-            // Instagram
-            // Facebook
-            // YouTube
-            // X
-            // etc.
-            //
-            // must remain allowed.
-            // ============================================================
+// STEP 0 — APP CATEGORY SEARCH FILTER
+// ============================================================
+//
+// Do this BEFORE scanning the accessibility tree.
+//
+// A search box existing in an app does NOT automatically
+// mean the user performed a behavioral/content search.
+//
+// Example:
+//
+// Settings → "WiFi"
+// Contacts → "John"
+// Files → "document.pdf"
+//
+// These should NOT enter search analytics.
+//
+// But:
+//
+// TikTok → "football"
+// Instagram → "cars"
+// YouTube → "news"
+// Browser → "sportpesa"
+//
+// are meaningful searches.
+//
+// ============================================================
+
+            if (
+                !isSearchEligibleCategory(packageName)
+            ) {
+
+                Log.d(
+                    "SEARCH_CATEGORY",
+                    "🚫 Native search blocked by app category"
+                )
+
+                Log.d(
+                    "SEARCH_CATEGORY",
+                    "📦 Package = $packageName"
+                )
+
+                return
+            }
 
             if (isIgnoredNativeSearchPackage(packageName)) {
 
@@ -4335,6 +5143,97 @@ class BrowserAccessibilityService : AccessibilityService() {
             TAG,
             "Status = WAITING FOR SUBMISSION"
         )
+    }
+
+    // ========================================================
+// CHECK WHETHER APP SEARCH IS MEANINGFUL
+// ========================================================
+//
+// This is the main search classification gate.
+//
+// We do NOT ask:
+// "Does this app have a search box?"
+//
+// We ask:
+// "Is this app category one where a search represents
+// meaningful behavioral/content-search activity?"
+//
+// ========================================================
+
+    private fun isSearchEligibleCategory(
+        packageName: String
+    ): Boolean {
+
+        val normalizedPackage =
+            packageName
+                .trim()
+                .lowercase()
+
+        if (normalizedPackage.isBlank()) {
+            return false
+        }
+
+
+        val category =
+            synchronized(appCategories) {
+                appCategories[
+                    normalizedPackage
+                ]
+            }
+
+
+        if (category.isNullOrBlank()) {
+
+            Log.d(
+                "SEARCH_CATEGORY",
+                "⚠️ No app category found"
+            )
+
+            Log.d(
+                "SEARCH_CATEGORY",
+                "📦 Package = $normalizedPackage"
+            )
+
+            Log.d(
+                "SEARCH_CATEGORY",
+                "🚫 Search ignored"
+            )
+
+            return false
+        }
+
+
+        val eligible =
+            category in SEARCH_ELIGIBLE_CATEGORIES
+
+
+        Log.d(
+            "SEARCH_CATEGORY",
+            "=========================================="
+        )
+
+        Log.d(
+            "SEARCH_CATEGORY",
+            "📦 Package = $normalizedPackage"
+        )
+
+        Log.d(
+            "SEARCH_CATEGORY",
+            "🏷️ Category = $category"
+        )
+
+        Log.d(
+            "SEARCH_CATEGORY",
+            "🔎 Search eligible = $eligible"
+        )
+
+        Log.d(
+            "SEARCH_CATEGORY",
+            "=========================================="
+        )
+
+
+        return eligible
     }
 
     //----------ignored package filter---
@@ -6260,6 +7159,9 @@ class BrowserAccessibilityService : AccessibilityService() {
             return null
         }
 
+
+        var scannedNodes = 0
+
         fun scan(
             node: AccessibilityNodeInfo?,
             depth: Int
@@ -6267,10 +7169,13 @@ class BrowserAccessibilityService : AccessibilityService() {
 
             if (
                 node == null ||
-                depth > MAX_TREE_DEPTH
+                depth > MAX_TREE_DEPTH ||
+                scannedNodes >= MAX_TREE_NODES
             ) {
                 return
             }
+
+            scannedNodes++
 
             try {
 
@@ -7960,13 +8865,33 @@ class BrowserAccessibilityService : AccessibilityService() {
             0
         )
 
-        // =====================================================
-        // Minimum confidence
-        // =====================================================
 
-        return if (
-            bestScore >= 10
-        ) {
+        // =====================================================
+// Minimum confidence
+// =====================================================
+//
+// A browser URL-bar node is already strong evidence.
+// Chrome commonly exposes the current address as:
+//
+// com.android.chrome:id/url_bar
+//
+// In that case a valid domain such as:
+//
+// sportybet.com
+//
+// may legitimately score 8 because it does not contain
+// https:// or www.
+//
+// Do not require HTTPS for a URL-bar candidate.
+//
+        val accepted =
+            bestScore >= 10 ||
+                    (
+                            bestScore >= 8 &&
+                                    bestUrl != null
+                            )
+
+        return if (accepted) {
 
             Log.d(
                 TAG,
@@ -7995,6 +8920,21 @@ class BrowserAccessibilityService : AccessibilityService() {
             Log.d(
                 TAG,
                 "❌ No confident browser URL"
+            )
+
+            Log.d(
+                TAG,
+                "Package = $packageName"
+            )
+
+            Log.d(
+                TAG,
+                "Best score = $bestScore"
+            )
+
+            Log.d(
+                TAG,
+                "Best URL = $bestUrl"
             )
 
             null

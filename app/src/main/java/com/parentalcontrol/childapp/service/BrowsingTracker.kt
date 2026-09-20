@@ -25,9 +25,13 @@ import com.parentalcontrol.childapp.detector.SearchIntentDetector
 import com.parentalcontrol.childapp.tracker.NavigationEvent
 import com.parentalcontrol.childapp.utils.ContentClassifier
 import com.parentalcontrol.childapp.utils.ContentClassifier2
+import com.parentalcontrol.childapp.utils.DomainCategoryService
 import com.parentalcontrol.childapp.utils.SearchDeduplicator
 import com.parentalcontrol.childapp.utils.UsageTracker
 import com.parentalcontrol.childapp.utils.UrlFilter
+import com.parentalcontrol.childapp.utils.WebsiteCategoryCache
+import com.parentalcontrol.childapp.utils.WebsiteCategoryService
+
 
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -46,6 +50,8 @@ data class DomainSession(
     val start: Long,
     var lastSeen: Long
 )
+
+
 
 
 // ============================================================
@@ -184,13 +190,24 @@ class BrowsingTracker(
     private var lastLoggedTime = 0L
 
 
-    // ========================================================
-    // URL DEDUPLICATION
-    // ========================================================
+    // ====================================================
+// URL / NAVIGATION DEDUPLICATION
+// ====================================================
+//
+// One URL should be saved once while the child remains
+// on the same page.
+//
+// If the child navigates to another URL, that is a new
+// navigation and the URL may be saved again.
+//
+// This is navigation-based, NOT time-based.
+// ====================================================
 
     private var lastSavedUrl = ""
-    private var lastSavedTime = 0L
+    private var lastSavedPackage = ""
 
+    private var pendingSaveUrl = ""
+    private var pendingSavePackage = ""
 
     // ========================================================
     // YOUTUBE
@@ -394,6 +411,8 @@ class BrowsingTracker(
             TAG,
             "analyticsRef = ${analyticsRef.path}"
         )
+
+
 
 
         // ====================================================
@@ -1637,11 +1656,62 @@ class BrowsingTracker(
                 domain
             )
 
-
         Log.d(
             "URL_FLOW",
             "DOMAIN = $normalizedDomain"
         )
+
+        //====VALIDATE DOMAIN=======
+        if (!isValidDomain(normalizedDomain)) {
+            Log.w(
+                TAG,
+                "🚫 INVALID DOMAIN REJECTED: $normalizedDomain | URL=$fixedUrl"
+            )
+            return
+        }
+
+
+// ====================================================
+// INCOMPLETE / PARTIAL DOMAIN FILTER
+// ====================================================
+//
+// Accessibility/browser events can sometimes expose a
+// partially typed or partially resolved hostname:
+//
+//     roblox.c
+//     example.co
+//     google.co
+//
+// We do NOT want these saved as visited websites.
+//
+// IMPORTANT:
+// We cannot simply require a 2+ character TLD because
+// legitimate domains such as:
+//
+//     x.com
+//     t.co
+//     co.ke
+//
+// are valid.
+//
+// Therefore we only reject domains whose final label
+// looks like an incomplete TLD.
+//
+// ====================================================
+
+        if (
+            isIncompleteDomain(
+                normalizedDomain
+            )
+        ) {
+
+            Log.d(
+                "URL_FLOW",
+                "Ignored incomplete/partial domain = $normalizedDomain"
+            )
+
+            return
+        }
 
 
         // ====================================================
@@ -2022,30 +2092,126 @@ class BrowsingTracker(
 
 
         // ====================================================
-        // DOMAIN CLASSIFICATION
-        // ====================================================
+// DOMAIN CLASSIFICATION
+// ====================================================
+//
+// The domain registry is now the single source of truth
+// for website categories.
+//
+// Known domain:
+//     Firebase returns the stored category.
+//
+// Unknown domain:
+//     Firebase registers it as "pending".
+//
+// The backend worker will later classify the domain.
+//
+// The rest of URL processing continues only after the
+// registry responds.
+// ====================================================
 
-        val category =
-            classifyDomain(
-                normalizedDomain
+        DomainCategoryService.getOrRegister(
+            normalizedDomain
+        ) { registryCategory ->
+
+            if (registryCategory.isNullOrBlank()) {
+
+                Log.d(
+                    "URL_FLOW",
+                    "DOMAIN CATEGORY UNAVAILABLE = $normalizedDomain"
+                )
+
+                return@getOrRegister
+            }
+
+
+            val category =
+                if (
+                    registryCategory == "pending"
+                ) {
+
+                    "general"
+
+                } else {
+
+                    registryCategory
+                }
+
+
+            lastDomainCategory =
+                category
+
+
+            Log.d(
+                "URL_FLOW",
+                "DOMAIN REGISTRY CATEGORY = $category"
             )
 
 
-        lastDomainCategory =
-            category
+            continueUrlProcessingWithCategory(
+                fixedUrl = fixedUrl,
+                normalizedDomain = normalizedDomain,
+                appPackage = appPackage,
+                title = title,
+                uri = uri,
+                now = now,
+                category = category
+            )
+        }
+    }
 
+    //========VALIDATE DOMAIN==========
+    private fun isValidDomain(domain: String): Boolean {
 
-        Log.d(
-            "URL_FLOW",
-            "CATEGORY = $category"
-        )
+        if (domain.isBlank()) {
+            return false
+        }
 
+        // Must look like a real hostname.
+        if (!domain.contains(".")) {
+            return false
+        }
+
+        // Reject spaces and obvious notification/accessibility text.
+        if (
+            domain.contains("wantstosend") ||
+            domain.contains("notifications") ||
+            domain.contains("notification") ||
+            domain.contains("allow") ||
+            domain.contains("deny") ||
+            domain.contains("permission")
+        ) {
+            return false
+        }
+
+        // Only valid hostname characters.
+        if (!domain.matches(
+                Regex(
+                    "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+                )
+            )
+        ) {
+            return false
+        }
+
+        return true
+    }
+    private fun continueUrlProcessingWithCategory(
+        fixedUrl: String,
+        normalizedDomain: String,
+        appPackage: String,
+        title: String?,
+        uri: Uri,
+        now: Long,
+        category: String
+    ) {
 
         // ====================================================
         // DOMAIN SESSION
         // ====================================================
 
         if (
+            activeSession == null ||
             currentDomain == null ||
             currentDomain != normalizedDomain ||
             now - lastUrlTime > SESSION_TIMEOUT
@@ -2056,13 +2222,45 @@ class BrowsingTracker(
                 "Starting new domain session"
             )
 
+            // Close previous website session.
+            if (
+                activeSession != null
+            ) {
 
-            endCurrentSession()
+                endCurrentSession()
+            }
 
-
+            // Start new website session.
             startNewSession(
                 normalizedDomain,
                 fixedUrl
+            )
+
+        } else {
+
+            // =================================================
+            // CONTINUE CURRENT SESSION
+            // =================================================
+
+            activeSession?.let { session ->
+
+                session.lastSeen =
+                    now
+            }
+
+            Log.d(
+                "SESSION_FLOW",
+                "Continuing website session"
+            )
+
+            Log.d(
+                "SESSION_FLOW",
+                "DOMAIN = $normalizedDomain"
+            )
+
+            Log.d(
+                "SESSION_FLOW",
+                "LAST SEEN = $now"
             )
         }
 
@@ -2146,16 +2344,69 @@ class BrowsingTracker(
         // URL DUPLICATE CHECK
         // ====================================================
 
+        // ====================================================
+// URL DUPLICATE CHECK
+// ====================================================
+//
+// Do NOT use a short time cooldown here.
+//
+// Accessibility can report the same URL repeatedly while
+// the child remains on one page.
+//
+// We only want another Firebase visit when a genuine
+// navigation occurs.
+//
+
         if (
-            normalizedUrl ==
-            lastSavedUrl &&
-            now - lastSavedTime <
-            URL_COOLDOWN
+            normalizedUrl == lastSavedUrl &&
+            appPackage == lastSavedPackage
         ) {
 
             Log.d(
-                TAG,
-                "Skipped duplicate URL: $normalizedUrl"
+                "URL_DEDUP",
+                "⏭ Same page already saved"
+            )
+
+            Log.d(
+                "URL_DEDUP",
+                "URL = $normalizedUrl"
+            )
+
+            Log.d(
+                "URL_DEDUP",
+                "PACKAGE = $appPackage"
+            )
+
+            return
+        }
+
+
+// ====================================================
+// SAVE-IN-PROGRESS DUPLICATE PROTECTION
+// ====================================================
+//
+// Firebase writes are asynchronous.
+//
+// Several accessibility events can arrive before the
+// first Firebase write finishes.
+//
+// Prevent those events from creating multiple .push()
+// entries while the first save is still in progress.
+//
+
+        if (
+            normalizedUrl == pendingSaveUrl &&
+            appPackage == pendingSavePackage
+        ) {
+
+            Log.d(
+                "URL_DEDUP",
+                "⏭ Firebase save already in progress"
+            )
+
+            Log.d(
+                "URL_DEDUP",
+                "URL = $normalizedUrl"
             )
 
             return
@@ -2180,6 +2431,16 @@ class BrowsingTracker(
             "Path = analytics_browsing/$childId/visited_urls/$dateKey"
         )
 
+        Log.d(
+            "FIREBASE_FLOW",
+            "DOMAIN = $normalizedDomain"
+        )
+
+        Log.d(
+            "FIREBASE_FLOW",
+            "CATEGORY = $category"
+        )
+
 
         val visitData =
             mapOf(
@@ -2193,14 +2454,90 @@ class BrowsingTracker(
             )
 
 
-        analyticsRef
-            .child("visited_urls")
-            .child(dateKey)
-            .push()
+        // ====================================================
+        // CREATE UNIQUE VISIT ENTRY
+        // ====================================================
+
+        // ====================================================
+// MARK SAVE AS IN-PROGRESS
+// ====================================================
+
+        pendingSaveUrl = normalizedUrl
+        pendingSavePackage = appPackage
+
+        Log.d(
+            "URL_DEDUP",
+            "🔒 Marked URL save in progress"
+        )
+
+        Log.d(
+            "URL_DEDUP",
+            "URL = $normalizedUrl"
+        )
+
+        Log.d(
+            "URL_DEDUP",
+            "PACKAGE = $appPackage"
+        )
+
+        val visitRef =
+            analyticsRef
+                .child("visited_urls")
+                .child(dateKey)
+                .push()
+
+
+        val visitEntryKey =
+            visitRef.key
+
+
+        if (
+            visitEntryKey.isNullOrBlank()
+        ) {
+
+            Log.e(
+                "FIREBASE_FLOW",
+                "Failed to create Firebase visit key"
+            )
+
+            return
+        }
+
+
+        // ====================================================
+        // SAVE VISIT
+        // ====================================================
+
+        visitRef
             .setValue(
                 visitData
             )
             .addOnSuccessListener {
+
+                // ====================================================
+// SAVE DEDUPLICATION STATE
+// ====================================================
+
+                lastSavedUrl = normalizedUrl
+                lastSavedPackage = appPackage
+
+                pendingSaveUrl = ""
+                pendingSavePackage = ""
+
+                Log.d(
+                    "URL_DEDUP",
+                    "✅ URL marked as successfully saved"
+                )
+
+                Log.d(
+                    "URL_DEDUP",
+                    "LAST SAVED URL = $lastSavedUrl"
+                )
+
+                Log.d(
+                    "URL_DEDUP",
+                    "LAST SAVED PACKAGE = $lastSavedPackage"
+                )
 
                 Log.d(
                     "FIREBASE_FLOW",
@@ -2211,38 +2548,157 @@ class BrowsingTracker(
                     "FIREBASE_FLOW",
                     "URL = $fixedUrl"
                 )
+
+                Log.d(
+                    "FIREBASE_FLOW",
+                    "DOMAIN = $normalizedDomain"
+                )
+
+                Log.d(
+                    "FIREBASE_FLOW",
+                    "CATEGORY = $category"
+                )
+
+                Log.d(
+                    "FIREBASE_FLOW",
+                    "ENTRY KEY = $visitEntryKey"
+                )
             }
             .addOnFailureListener { e ->
+
+                // ====================================================
+                // ALLOW RETRY AFTER FAILED SAVE
+                // ====================================================
+
+                pendingSaveUrl = ""
+                pendingSavePackage = ""
 
                 Log.e(
                     "FIREBASE_FLOW",
                     "URL SAVE FAILED: ${e.message}",
                     e
                 )
+
+                Log.d(
+                    "URL_DEDUP",
+                    "🔓 Cleared pending URL after Firebase failure"
+                )
+            }
+    }
+    //==============GET COMPLETE DOMAIN==========
+    private fun isIncompleteDomain(
+        domain: String
+    ): Boolean {
+
+        val clean =
+            domain
+                .trim()
+                .lowercase()
+                .removePrefix("www.")
+
+        if (
+            clean.isBlank()
+        ) {
+            return true
+        }
+
+
+        // Must contain a dot.
+        if (
+            !clean.contains(".")
+        ) {
+            return true
+        }
+
+
+        val labels =
+            clean.split(".")
+
+
+        // Every DNS label must contain something.
+        if (
+            labels.any {
+                it.isBlank()
+            }
+        ) {
+            return true
+        }
+
+
+        val tld =
+            labels.last()
+
+
+        // ----------------------------------------------------
+        // Known valid short TLDs
+        // ----------------------------------------------------
+        //
+        // These MUST remain allowed.
+        //
+        val validShortTlds =
+            setOf(
+                "com",
+                "net",
+                "org",
+                "edu",
+                "gov",
+                "mil",
+                "io",
+                "ai",
+                "me",
+                "tv",
+                "co",
+                "uk",
+                "ke",
+                "za",
+                "us",
+                "ca",
+                "de",
+                "fr",
+                "jp",
+                "cn",
+                "in"
+            )
+
+
+        // ----------------------------------------------------
+        // Normal TLDs
+        // ----------------------------------------------------
+
+        if (
+            tld.length >= 2
+        ) {
+
+            // A recognized short TLD is always fine.
+            if (
+                validShortTlds.contains(tld)
+            ) {
+                return false
             }
 
 
-        // ====================================================
-        // UPDATE URL DEDUPLICATION
-        // ====================================================
-
-        lastSavedUrl =
-            normalizedUrl
-
-        lastSavedTime =
-            now
+            // Two-letter country-code TLD.
+            if (
+                tld.length == 2 &&
+                tld.all { it.isLetter() }
+            ) {
+                return false
+            }
 
 
-        lastUrlTime =
-            now
+            // Standard longer TLD.
+            if (
+                tld.length >= 3 &&
+                tld.all { it.isLetter() }
+            ) {
+                return false
+            }
+        }
 
 
-        Log.d(
-            "URL_FLOW",
-            "URL processing completed"
-        )
+        // Anything else is probably malformed/incomplete.
+        return true
     }
-
     // ========================================================
     // NAVIGATION EVENT
     // ========================================================
@@ -2777,15 +3233,31 @@ class BrowsingTracker(
             return
         }
 
-
-        // ====================================================
-        // DUPLICATE CHECK
-        //
-        // package + engine + query
-        // ====================================================
+// ====================================================
+// DUPLICATE CHECK
+//
+// IMPORTANT:
+//
+// The search engine/source MUST NOT be part of the
+// duplicate identity.
+//
+// Example:
+//
+// native_app → "how to bet"
+// google     → "how to bet"
+//
+// Same package + same query = same physical search event.
+//
+// This prevents Chrome from creating:
+//
+// engine=native_app
+// engine=google
+//
+// for the same submitted search.
+// ====================================================
 
         val searchKey =
-            "$cleanPackage|$normalizedEngine|$normalizedQuery"
+            "$cleanPackage|$normalizedQuery"
 
 
         val duplicate =
@@ -2793,20 +3265,62 @@ class BrowsingTracker(
                     time - lastLoggedTime < SEARCH_COOLDOWN
 
 
+        Log.d(
+            "SEARCH_DEBUG",
+            """
+    ==========================================
+    🔎 SEARCH DEDUP CHECK
+    ==========================================
+    Query          = [$normalizedQuery]
+    Package        = [$cleanPackage]
+    Engine         = [$normalizedEngine]
+    Search Key     = [$searchKey]
+    Last Key       = [$lastLoggedSearchKey]
+    Last Time      = $lastLoggedTime
+    Current Time   = $time
+    Difference     = ${time - lastLoggedTime} ms
+    Cooldown       = $SEARCH_COOLDOWN ms
+    Duplicate      = $duplicate
+    ==========================================
+    """.trimIndent()
+        )
+
+
         if (duplicate) {
+
+            Log.d(
+                "SEARCH_DEBUG",
+                """
+        ==========================================
+        🔁 DUPLICATE SEARCH BLOCKED
+        ==========================================
+        Query   = [$decodedQuery]
+        Package = [$cleanPackage]
+        Engine  = [$normalizedEngine]
+        ==========================================
+        🚫 Firebase push() SKIPPED
+        ==========================================
+        """.trimIndent()
+            )
+
             return
         }
 
 
-        // ====================================================
-        // UPDATE DEDUPLICATION STATE
-        // ====================================================
+// ====================================================
+// UPDATE DEDUPLICATION STATE
+// ====================================================
 
         lastLoggedSearchKey =
             searchKey
 
         lastLoggedTime =
             time
+
+        Log.d(
+            "SEARCH_DEBUG",
+            "✅ Search accepted — deduplication state updated"
+        )
 
 
         // ====================================================
@@ -3701,6 +4215,9 @@ class BrowsingTracker(
         url: String
     ) {
 
+        val startTime =
+            System.currentTimeMillis()
+
         val sessionRef =
             db.child("children")
                 .child(childId)
@@ -3708,11 +4225,9 @@ class BrowsingTracker(
                 .child("sessions")
                 .push()
 
-
         val sessionId =
             sessionRef.key
                 ?: return
-
 
         currentSessionId =
             sessionId
@@ -3721,49 +4236,113 @@ class BrowsingTracker(
             domain
 
         sessionStart =
-            System.currentTimeMillis()
+            startTime
 
+        val category =
+            classifyDomain(domain)
 
-        sessionRef.setValue(
-            mapOf(
-                "domain" to domain,
-                "url" to url,
-                "startTime" to sessionStart,
-                "endTime" to null,
-                "duration" to 0,
-                "active" to true,
-                "createdAt" to ServerValue.TIMESTAMP
+        sessionRef
+            .setValue(
+                mapOf(
+                    "domain" to domain,
+                    "url" to url,
+                    "category" to category,
+                    "startTime" to startTime,
+                    "endTime" to null,
+                    "duration" to 0L,
+                    "active" to true,
+                    "createdAt" to ServerValue.TIMESTAMP
+                )
             )
-        )
+            .addOnSuccessListener {
 
+                Log.d(
+                    "SESSION_FLOW",
+                    "Website session started: $domain"
+                )
+            }
+            .addOnFailureListener { e ->
+
+                Log.e(
+                    "SESSION_FLOW",
+                    "Failed to create website session",
+                    e
+                )
+            }
 
         activeSession =
             DomainSession(
                 url = url,
                 domain = domain,
-                category =
-                    classifyDomain(
-                        domain
-                    ),
-                start = sessionStart,
-                lastSeen = sessionStart
+                category = category,
+                start = startTime,
+                lastSeen = startTime
             )
     }
-
-
+    //===========END CURRENT SESSION============
     private fun endCurrentSession() {
 
         val sessionId =
             currentSessionId
                 ?: return
 
+        val session =
+            activeSession
 
-        val endTime =
+        val currentTime =
             System.currentTimeMillis()
 
-        val duration =
-            endTime - sessionStart
+        // Use the last actual URL activity as the end
+        // of the detected website session.
+        val effectiveEndTime =
+            session?.lastSeen
+                ?: currentTime
 
+        val duration =
+            (
+                    effectiveEndTime -
+                            sessionStart
+                    )
+                .coerceAtLeast(0L)
+
+        Log.d(
+            "SESSION_FLOW",
+            "========================================"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "ENDING WEBSITE SESSION"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "SESSION ID = $sessionId"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "DOMAIN = ${session?.domain ?: currentDomain}"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "START = $sessionStart"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "END = $effectiveEndTime"
+        )
+
+        Log.d(
+            "SESSION_FLOW",
+            "DURATION = ${duration}ms"
+        )
+
+        // ====================================================
+        // UPDATE CHILD SESSION
+        // ====================================================
 
         db.child("children")
             .child(childId)
@@ -3772,27 +4351,45 @@ class BrowsingTracker(
             .child(sessionId)
             .updateChildren(
                 mapOf(
-                    "endTime" to endTime,
+                    "endTime" to effectiveEndTime,
                     "duration" to duration,
                     "active" to false,
                     "updatedAt" to ServerValue.TIMESTAMP
                 )
             )
+            .addOnFailureListener { e ->
 
+                Log.e(
+                    "SESSION_FLOW",
+                    "Failed to update child session",
+                    e
+                )
+            }
 
-        activeSession?.let { session ->
+        // ====================================================
+        // SAVE ANALYTICS SESSION
+        // ====================================================
 
-            if (
-                duration >= 1000
-            ) {
+        session?.let {
+
+            if (duration >= 1000L) {
 
                 saveDomainSession(
-                    session,
-                    endTime
+                    it,
+                    effectiveEndTime
+                )
+
+                saveWebsiteUsage(
+                    it,
+                    duration,
+                    effectiveEndTime
                 )
             }
         }
 
+        // ====================================================
+        // RESET
+        // ====================================================
 
         currentSessionId =
             null
@@ -3800,11 +4397,12 @@ class BrowsingTracker(
         currentDomain =
             null
 
+        sessionStart =
+            0L
+
         activeSession =
             null
     }
-
-
     private fun saveDomainSession(
         session: DomainSession,
         end: Long
@@ -3836,6 +4434,149 @@ class BrowsingTracker(
                     "createdAt" to ServerValue.TIMESTAMP
                 )
             )
+    }
+
+    //================total time per website==========
+    private fun saveWebsiteUsage(
+        session: DomainSession,
+        duration: Long,
+        endTime: Long
+    ) {
+
+        if (
+            duration < 1000L ||
+            session.domain.isBlank()
+        ) {
+            return
+        }
+
+        val dateKey =
+            getTodayKey()
+
+        val domainKey =
+            session.domain
+                .lowercase()
+                .trim()
+                .replace(".", "_")
+                .replace("#", "_")
+                .replace("$", "_")
+                .replace("[", "_")
+                .replace("]", "_")
+                .replace("/", "_")
+
+        val usageRef =
+            analyticsRef
+                .child("website_usage")
+                .child(dateKey)
+                .child(domainKey)
+
+        usageRef.runTransaction(
+            object : Transaction.Handler {
+
+                override fun doTransaction(
+                    currentData: MutableData
+                ): Transaction.Result {
+
+                    val existingDuration =
+                        currentData
+                            .child("totalDurationMs")
+                            .getValue(Long::class.java)
+                            ?: 0L
+
+                    val existingVisits =
+                        currentData
+                            .child("visits")
+                            .getValue(Long::class.java)
+                            ?: 0L
+
+                    currentData.child(
+                        "domain"
+                    ).value =
+                        session.domain
+
+                    currentData.child(
+                        "category"
+                    ).value =
+                        session.category
+
+                    currentData.child(
+                        "totalDurationMs"
+                    ).value =
+                        existingDuration + duration
+
+                    currentData.child(
+                        "visits"
+                    ).value =
+                        existingVisits + 1L
+
+                    currentData.child(
+                        "lastVisit"
+                    ).value =
+                        endTime
+
+                    currentData.child(
+                        "updatedAt"
+                    ).value =
+                        ServerValue.TIMESTAMP
+
+                    return Transaction.success(
+                        currentData
+                    )
+                }
+
+                override fun onComplete(
+                    error: DatabaseError?,
+                    committed: Boolean,
+                    currentData: DataSnapshot?
+                ) {
+
+                    if (error != null) {
+
+                        Log.e(
+                            "WEBSITE_USAGE",
+                            "Website usage failed: ${error.message}",
+                            error.toException()
+                        )
+
+                        return
+                    }
+
+                    if (committed) {
+
+                        val total =
+                            currentData
+                                ?.child("totalDurationMs")
+                                ?.getValue(Long::class.java)
+                                ?: 0L
+
+                        Log.d(
+                            "WEBSITE_USAGE",
+                            "========================================"
+                        )
+
+                        Log.d(
+                            "WEBSITE_USAGE",
+                            "TOTAL WEBSITE TIME UPDATED"
+                        )
+
+                        Log.d(
+                            "WEBSITE_USAGE",
+                            "DOMAIN = ${session.domain}"
+                        )
+
+                        Log.d(
+                            "WEBSITE_USAGE",
+                            "TOTAL = ${total}ms"
+                        )
+
+                        Log.d(
+                            "WEBSITE_USAGE",
+                            "TOTAL MINUTES = ${total / 60000}"
+                        )
+                    }
+                }
+            }
+        )
     }
 
 
@@ -3907,49 +4648,10 @@ class BrowsingTracker(
         domain: String
     ): String {
 
-        return when {
-
-            domain.contains("facebook") ||
-                    domain.contains("instagram") ||
-                    domain.contains("twitter") ||
-                    domain.contains("x.com") ||
-                    domain.contains("tiktok") ->
-                "social"
-
-
-            domain.contains("telegram") ||
-                    domain.contains("whatsapp") ->
-                "messaging"
-
-
-            domain.contains("youtube") ->
-                "video"
-
-
-            ContentClassifier.isAdult(
-                domain
-            ) ->
-                "adult"
-
-
-            ContentClassifier.isGambling(
-                domain
-            ) ->
-                "gambling"
-
-
-            ContentClassifier.isGame(
-                domain
-            ) ->
-                "games"
-
-
-            else ->
-                "general"
-        }
+        return ContentClassifier.classifyDomain(
+            domain
+        )
     }
-
-
     // ========================================================
     // BLOCKED WEBSITES
     // ========================================================

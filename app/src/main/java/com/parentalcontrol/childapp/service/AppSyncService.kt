@@ -27,11 +27,20 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
+
 
 class AppSyncService : Service() {
 
     private val TAG = "AppSyncService"
     private val CHANNEL_ID = "app_sync_channel"
+
+
+    private val BACKEND_URL =
+        "https://parentiq-backend.onrender.com"
 
     override fun onCreate() {
         super.onCreate()
@@ -172,50 +181,26 @@ class AppSyncService : Service() {
                 )
             }
         }*/
+
         val trackedPackages = mutableListOf<String>()
         val updates = hashMapOf<String, Any>()
+
+        var pendingCategories = 0
 
         installedApps.forEach { app ->
 
             try {
 
                 val packageName = app.packageName
+
                 if (
                     packageName.equals(
-                        "com.google.android.apps.searchlite",
+                        applicationContext.packageName,
                         ignoreCase = true
                     )
                 ) {
-
-                    Log.e(
-                        TAG,
-                        """
-        ==========================================
-        🔥 GOOGLE GO DETECTED
-        ==========================================
-        App Name     = ${
-                            pm.getApplicationLabel(app)
-                        }
-        Package      = [$packageName]
-        Firebase Key = [${
-                            packageName.replace(".", "_")
-                        }]
-        System App   = ${
-                            (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
-                        }
-        Updated Sys  = ${
-                            (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                        }
-        Launcher App = ${
-                            launcherPackages.contains(packageName)
-                        }
-        ==========================================
-        """.trimIndent()
-                    )
-                }
-
-                if (packageName == applicationContext.packageName)
                     return@forEach
+                }
 
                 val isSystemApp =
                     (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
@@ -234,17 +219,7 @@ class AppSyncService : Service() {
 
                     Log.d(
                         TAG,
-                        "⏭️ Skipping pure hidden system app"
-                    )
-
-                    Log.d(
-                        TAG,
-                        "📦 Package = $packageName"
-                    )
-
-                    Log.d(
-                        TAG,
-                        "📱 Launcher = $isLauncherApp"
+                        "⏭️ Skipping pure hidden system app: $packageName"
                     )
 
                     return@forEach
@@ -252,51 +227,77 @@ class AppSyncService : Service() {
 
                 trackedPackages.add(packageName)
 
-                val appInfo = AppInfo(
-                    appName = pm.getApplicationLabel(app).toString(),
-                    packageName = packageName,
-                    iconBase64 = AppIconUtils.drawableToBase64(
-                        pm.getApplicationIcon(app)
-                    ),
-                    hidden = !launcherPackages.contains(packageName)
-                )
+                pendingCategories++
 
-                updates[packageName.replace(".", "_")] = appInfo
+                getAppCategoryFromFirebase(
+                    packageName = packageName
+                ) { category ->
+
+                    val appInfo = AppInfo(
+                        appName = pm.getApplicationLabel(app).toString(),
+                        packageName = packageName,
+                        category = category,
+                        iconBase64 = AppIconUtils.drawableToBase64(
+                            pm.getApplicationIcon(app)
+                        ),
+                        hidden = !isLauncherApp
+                    )
+
+                    updates[packageName.replace(".", "_")] = appInfo
+
+                    Log.d(
+                        TAG,
+                        "📱 APP CLASSIFIED: ${appInfo.appName} → ${appInfo.category}"
+                    )
+
+                    pendingCategories--
+
+                    /*
+                     * Upload only after every app has
+                     * received a category.
+                     */
+                    if (pendingCategories == 0) {
+
+                        dbRef.updateChildren(updates)
+
+                            .addOnSuccessListener {
+
+                                Log.d(
+                                    TAG,
+                                    "✅ Uploaded ${updates.size} apps with Firebase categories."
+                                )
+
+                                saveTrackedApps(trackedPackages)
+
+                                startUsageWorker(trackedPackages)
+
+                                stopSelf()
+                            }
+
+                            .addOnFailureListener { error ->
+
+                                Log.e(
+                                    TAG,
+                                    "❌ Upload failed",
+                                    error
+                                )
+                            }
+                    }
+                }
 
             } catch (e: Exception) {
 
-                Log.e(TAG, "Failed to process ${app.packageName}", e)
+                Log.e(
+                    TAG,
+                    "❌ Failed to process ${app.packageName}",
+                    e
+                )
             }
         }
 
-        dbRef.updateChildren(updates)
 
-            .addOnSuccessListener {
 
-                Log.d(TAG, "✅ Uploaded ${updates.size} apps.")
 
-                saveTrackedApps(trackedPackages)
-
-                startUsageWorker(trackedPackages)
-
-                stopSelf()
-            }
-
-            .addOnFailureListener {
-
-                Log.e(TAG, "Upload failed", it)
-            }
-
-        // ------------------------------------------------
-        // SAVE TRACKED APPS LOCALLY
-        // ------------------------------------------------
-        saveTrackedApps(trackedPackages)
-        startUsageWorker(trackedPackages)
-
-        Log.d(
-            TAG,
-            "🏁 SYNC COMPLETED. Tracked ${trackedPackages.size} apps."
-        )
     }
 
     //SAVE TRACKED APPS
@@ -319,6 +320,361 @@ class AppSyncService : Service() {
             "Saved ${apps.size} tracked apps."
         )
     }
+
+
+
+
+    private fun getAppCategoryFromFirebase(
+        packageName: String,
+        onResult: (String) -> Unit
+    ) {
+
+        val packageKey =
+            packageName.replace(".", "_")
+
+        val categoryRef =
+            FirebaseDatabase.getInstance()
+                .getReference("app_categories")
+                .child(packageKey)
+
+        categoryRef
+            .get()
+            .addOnSuccessListener { snapshot ->
+
+                if (snapshot.exists()) {
+
+                    val category =
+                        snapshot
+                            .child("category")
+                            .getValue(String::class.java)
+                            ?.trim()
+                            ?.lowercase()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "other"
+
+                    Log.d(
+                        TAG,
+                        "🏷️ Existing category: $packageName → $category"
+                    )
+
+                    /*
+                     * The app already exists in Firebase.
+                     *
+                     * If its category is still pending, immediately
+                     * ask the backend to classify it.
+                     */
+                    if (category == "pending") {
+
+                        Log.d(
+                            TAG,
+                            "⏳ APP IS PENDING — REQUESTING BACKEND: $packageName"
+                        )
+
+                        requestBackendClassification(
+                            packageKey = packageKey
+                        ) { classifiedCategory ->
+
+                            if (
+                                classifiedCategory != null &&
+                                classifiedCategory != "pending"
+                            ) {
+
+                                Log.d(
+                                    TAG,
+                                    "✅ APP CLASSIFIED BY BACKEND: $packageName → $classifiedCategory"
+                                )
+
+                                onResult(classifiedCategory)
+
+                            } else {
+
+                                /*
+                                 * Backend failed or returned pending.
+                                 *
+                                 * Keep the app pending instead of
+                                 * silently converting it to "other".
+                                 */
+                                Log.d(
+                                    TAG,
+                                    "⏳ APP REMAINS PENDING: $packageName"
+                                )
+
+                                onResult("pending")
+                            }
+                        }
+
+                    } else {
+
+                        /*
+                         * The app already has a real category.
+                         *
+                         * No backend request is necessary.
+                         */
+                        onResult(category)
+                    }
+
+                } else {
+
+                    /*
+                     * App does not exist in app_categories.
+                     *
+                     * Register it as pending first.
+                     */
+                    val pm = packageManager
+
+                    val applicationInfo =
+                        try {
+                            pm.getApplicationInfo(
+                                packageName,
+                                0
+                            )
+                        } catch (e: Exception) {
+                            null
+                        }
+
+                    val appName =
+                        applicationInfo
+                            ?.let {
+                                pm.getApplicationLabel(it).toString()
+                            }
+                            ?: packageName
+
+                    val pendingData =
+                        hashMapOf<String, Any>(
+                            "appName" to appName,
+                            "packageName" to packageName,
+                            "category" to "pending",
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+
+                    categoryRef
+                        .setValue(pendingData)
+                        .addOnSuccessListener {
+
+                            Log.d(
+                                TAG,
+                                "🆕 UNKNOWN APP REGISTERED: $appName ($packageName)"
+                            )
+
+                            /*
+                             * Immediately ask the backend to classify
+                             * the newly discovered application.
+                             */
+                            requestBackendClassification(
+                                packageKey = packageKey
+                            ) { classifiedCategory ->
+
+                                if (
+                                    classifiedCategory != null &&
+                                    classifiedCategory != "pending"
+                                ) {
+
+                                    Log.d(
+                                        TAG,
+                                        "✅ APP CLASSIFIED BY BACKEND: $appName → $classifiedCategory"
+                                    )
+
+                                    onResult(classifiedCategory)
+
+                                } else {
+
+                                    /*
+                                     * Keep the app pending if the backend
+                                     * could not classify it.
+                                     */
+                                    Log.d(
+                                        TAG,
+                                        "⏳ APP REMAINS PENDING: $appName"
+                                    )
+
+                                    onResult("pending")
+                                }
+                            }
+                        }
+                        .addOnFailureListener { error ->
+
+                            Log.e(
+                                TAG,
+                                "❌ Failed to register unknown app: $packageName",
+                                error
+                            )
+
+                            onResult("other")
+                        }
+                }
+            }
+            .addOnFailureListener { error ->
+
+                Log.e(
+                    TAG,
+                    "❌ Failed to get category for $packageName",
+                    error
+                )
+
+                onResult("other")
+            }
+    }
+
+
+
+
+    private fun requestBackendClassification(
+        packageKey: String,
+        onResult: (String?) -> Unit
+    ) {
+
+        Executors.newSingleThreadExecutor().execute {
+
+            var connection: HttpURLConnection? = null
+
+            try {
+
+                Log.d(
+                    TAG,
+                    "🌐 REQUESTING BACKEND CLASSIFICATION: $packageKey"
+                )
+
+                val url = URL(
+                    "$BACKEND_URL/app-classification/classify-pending"
+                )
+
+                connection =
+                    url.openConnection() as HttpURLConnection
+
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 15000
+                connection.readTimeout = 30000
+                connection.doOutput = true
+
+                connection.setRequestProperty(
+                    "Content-Type",
+                    "application/json"
+                )
+
+                connection.setRequestProperty(
+                    "Accept",
+                    "application/json"
+                )
+
+                val requestBody =
+                    JSONObject()
+                        .put("packageKey", packageKey)
+                        .toString()
+
+                connection.outputStream.use { output ->
+
+                    output.write(
+                        requestBody.toByteArray(
+                            Charsets.UTF_8
+                        )
+                    )
+
+                    output.flush()
+                }
+
+                val responseCode =
+                    connection.responseCode
+
+                Log.d(
+                    TAG,
+                    "🌐 BACKEND RESPONSE CODE: $responseCode"
+                )
+
+                val responseStream =
+                    if (responseCode in 200..299) {
+                        connection.inputStream
+                    } else {
+                        connection.errorStream
+                    }
+
+                val response =
+                    responseStream
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?: ""
+
+                Log.d(
+                    TAG,
+                    "🌐 BACKEND RESPONSE: $response"
+                )
+
+                if (responseCode !in 200..299) {
+
+                    Log.e(
+                        TAG,
+                        "❌ Backend classification failed: HTTP $responseCode"
+                    )
+
+                    onResult(null)
+                    return@execute
+                }
+
+                val json =
+                    JSONObject(response)
+
+                val success =
+                    json.optBoolean(
+                        "success",
+                        false
+                    )
+
+                if (!success) {
+
+                    Log.e(
+                        TAG,
+                        "❌ Backend returned classification failure"
+                    )
+
+                    onResult(null)
+                    return@execute
+                }
+
+                val category =
+                    json.optString(
+                        "category",
+                        ""
+                    )
+                        .trim()
+                        .lowercase()
+
+                if (category.isBlank()) {
+
+                    Log.e(
+                        TAG,
+                        "❌ Backend returned empty category"
+                    )
+
+                    onResult(null)
+                    return@execute
+                }
+
+                Log.d(
+                    TAG,
+                    "🤖 BACKEND CLASSIFICATION RESULT: $packageKey → $category"
+                )
+
+                onResult(category)
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "❌ BACKEND CLASSIFICATION REQUEST FAILED",
+                    e
+                )
+
+                onResult(null)
+
+            } finally {
+
+                connection?.disconnect()
+            }
+        }
+    }
+
+
+
+
 
     private fun startUsageWorker(installedPackages: List<String>) {
 

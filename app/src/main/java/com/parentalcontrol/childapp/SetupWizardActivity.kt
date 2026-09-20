@@ -30,6 +30,7 @@ import com.google.android.material.button.MaterialButton
 import com.parentalcontrol.childapp.overlay.BlockOverlayView
 import com.parentalcontrol.childapp.ui.InstructionGuideOverlay
 import com.parentalcontrol.childapp.utils.UsageHelper
+import com.parentalcontrol.childapp.admin.ParentIQDevicePolicyManager
 
 //import com.parentalcontrol.childapp.ui.SmartPointerGuide
 
@@ -81,12 +82,7 @@ class SetupWizardActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        /*if (prefs.getBoolean(KEY_ONBOARDING_DONE, false)) {
 
-            startActivity(Intent(this, PairChildActivity::class.java))
-            finish()
-            return
-        }*/
         val childId = prefs.getString(KEY_CHILD_ID, null)
 
         if (prefs.getBoolean(KEY_ONBOARDING_DONE, false)
@@ -152,7 +148,17 @@ class SetupWizardActivity : AppCompatActivity() {
 
             when (currentStep) {
 
-                1 -> enableDeviceAdmin()
+                1 -> {
+
+                    if (!isDeviceAdminEnabled()) {
+
+                        enableDeviceAdmin()
+
+                    } else {
+
+                        detectCurrentStep()
+                    }
+                }
 
                 2 -> enableVpn()
 
@@ -305,6 +311,7 @@ class SetupWizardActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+
     //----------validate current step-------
     //private var step = 1
 
@@ -316,33 +323,37 @@ class SetupWizardActivity : AppCompatActivity() {
     }*/
     private fun validateCurrentStepOnly() {
 
-        when(currentStep){
+        when (currentStep) {
 
-            1 -> if(isDeviceAdminEnabled())
-                startStep(2,getStepMessage(2))
+            1 -> {
+                // Step 1 is complete when Device Admin is enabled.
+                if (isDeviceAdminEnabled()) {
+                    startStep(2, getStepMessage(2))
+                }
+            }
 
-            2 -> if(isVpnGranted())
-                startStep(3,getStepMessage(3))
+            2 -> if (isVpnGranted())
+                startStep(3, getStepMessage(3))
 
-            3 -> if(isAccessibilityEnabled())
-                startStep(4,getStepMessage(4))
+            3 -> if (isAccessibilityEnabled())
+                startStep(4, getStepMessage(4))
 
-            4 -> if(isLocationReady())
-                startStep(5,getStepMessage(5))
+            4 -> if (isLocationReady())
+                startStep(5, getStepMessage(5))
 
-            5 -> if(isSmsPermissionGranted())
-                startStep(6,getStepMessage(6))
+            5 -> if (isSmsPermissionGranted())
+                startStep(6, getStepMessage(6))
 
-            6 -> if(isCallPermissionGranted())
-                startStep(7,getStepMessage(7))
+            6 -> if (isCallPermissionGranted())
+                startStep(7, getStepMessage(7))
 
-            7 -> if(isNotificationStepDone())
-                startStep(8,getStepMessage(8))
+            7 -> if (isNotificationStepDone())
+                startStep(8, getStepMessage(8))
 
-            8 -> if(isUsageAccessGranted())
-                startStep(9,getStepMessage(9))
+            8 -> if (isUsageAccessGranted())
+                startStep(9, getStepMessage(9))
 
-            9 -> if(Settings.canDrawOverlays(this))
+            9 -> if (Settings.canDrawOverlays(this))
                 completeOnboarding()
         }
     }
@@ -409,75 +420,96 @@ class SetupWizardActivity : AppCompatActivity() {
     private fun getStepMessage(step: Int): String {
         return when (step) {
 
-            1 -> "Enable Device Admin permission"
+            1 -> {
+                if (isDeviceAdminEnabled()) {
+                    "Device protection is enabled"
+                } else {
+                    "Enable Device Admin protection"
+                }
+            }
             2 -> "Enable VPN for tracking protection"
             3 -> "Enable Accessibility Service"
             4 -> "Allow Location Access"
             5 -> "Allow SMS Monitoring Permission"
             6 -> "Allow Call Monitoring Permission"
             7 -> "Enable Notification Access"
-            8 -> "Grant Overlay Permission"
-            9 -> "Allow Usage Access"
+            8 -> "Allow Usage Access"
+            9 -> "Grant Overlay Permission"
             else -> "Setup Complete"
         }
     }
-  //---------------show step guide------------
-  private fun showStepGuide(step: Int) {
+    //---------------show step guide------------
+    private fun showStepGuide(step: Int) {
 
-      val mainButton = findViewById<View>(R.id.btnEnableSocialMonitoring)
+        val mainButton = findViewById<View>(R.id.btnEnableSocialMonitoring)
 
-      when (step) {
+        when (step) {
 
-          1 -> guideOverlay.show(
-              mainButton,
-              "Device Admin",
-              "Tap continue to enable device admin protection."
-          )
+            1 -> {
 
-          2 -> guideOverlay.show(
-              mainButton,
-              "VPN Setup",
-              "Tap continue to enable VPN tracking."
-          )
+                val message = if (isDeviceAdminEnabled()) {
+                    "Device protection is active."
+                } else {
+                    "Tap Continue to enable device protection."
+                }
 
-          3 -> guideOverlay.show(
-              mainButton,
-              "Accessibility",
-              "Tap continue, then enable Accessibility service in settings."
-          )
+                guideOverlay.show(
+                    mainButton,
+                    "Device Protection",
+                    message
+                )
+            }
+            2 -> guideOverlay.show(
+                mainButton,
+                "VPN Setup",
+                "Tap continue to enable VPN tracking."
+            )
 
-          4 -> guideOverlay.show(
-              mainButton,
-              "Location Access",
-              "Tap continue to allow GPS tracking."
-          )
+            3 -> guideOverlay.show(
+                mainButton,
+                "Accessibility",
+                "Tap continue, then enable Accessibility service in settings."
+            )
 
-          5 -> guideOverlay.show(
-              mainButton,
-              "SMS Permission",
-              "Tap continue to allow SMS monitoring."
-          )
+            4 -> guideOverlay.show(
+                mainButton,
+                "Location Access",
+                "Tap continue to allow GPS tracking."
+            )
 
-          6 -> guideOverlay.show(
-              mainButton,
-              "Call Permission",
-              "Tap continue to allow call tracking."
-          )
+            5 -> guideOverlay.show(
+                mainButton,
+                "SMS Permission",
+                "Tap continue to allow SMS monitoring."
+            )
 
-          7 -> guideOverlay.show(
-              mainButton,
-              "Notifications",
-              "Tap continue to enable notification access."
-          )
+            6 -> guideOverlay.show(
+                mainButton,
+                "Call Permission",
+                "Tap continue to allow call tracking."
+            )
 
-          8 -> guideOverlay.show(
-              mainButton,
-              "Overlay Permission",
-              "Tap continue to allow screen overlay."
-          )
+            7 -> guideOverlay.show(
+                mainButton,
+                "Notifications",
+                "Tap continue to enable notification access."
+            )
 
-      }
-  }
+            // FIXED: Step 8 = Usage Access
+            8 -> guideOverlay.show(
+                mainButton,
+                "Usage Access",
+                "Tap continue to allow GuardianIQ to access app usage information."
+            )
+
+            // FIXED: Step 9 = Overlay Permission
+            9 -> guideOverlay.show(
+                mainButton,
+                "Overlay Permission",
+                "Tap continue to allow GuardianIQ to display over other apps."
+            )
+        }
+    }
 
     // ==========================================================
     // STEP DETECTIONprivate fun enableDeviceAdmin()
@@ -489,44 +521,108 @@ class SetupWizardActivity : AppCompatActivity() {
 
         when {
 
+            // =====================================================
+            // STEP 1 — DEVICE OWNER / DEVICE ADMIN
+            // =====================================================
+
+            // =====================================================
+// STEP 1 — DEVICE ADMIN
+// =====================================================
+
             !isDeviceAdminEnabled() -> {
-                startStep(1,getStepMessage(1))
+
+                startStep(1, getStepMessage(1))
+
             }
+
+            // =====================================================
+            // STEP 2 — VPN
+            // =====================================================
 
             !isVpnGranted() -> {
-                startStep(2,getStepMessage(2))
+
+                startStep(2, getStepMessage(2))
+
             }
+
+            // =====================================================
+            // STEP 3 — ACCESSIBILITY
+            // =====================================================
 
             !isAccessibilityEnabled() -> {
-                startStep(3,getStepMessage(3))
+
+                startStep(3, getStepMessage(3))
+
             }
+
+            // =====================================================
+            // STEP 4 — LOCATION
+            // =====================================================
 
             !isLocationReady() -> {
-                startStep(4,getStepMessage(4))
+
+                startStep(4, getStepMessage(4))
+
             }
+
+            // =====================================================
+            // STEP 5 — SMS
+            // =====================================================
 
             !isSmsPermissionGranted() -> {
-                startStep(5,getStepMessage(5))
+
+                startStep(5, getStepMessage(5))
+
             }
+
+            // =====================================================
+            // STEP 6 — CALL
+            // =====================================================
 
             !isCallPermissionGranted() -> {
-                startStep(6,getStepMessage(6))
+
+                startStep(6, getStepMessage(6))
+
             }
+
+            // =====================================================
+            // STEP 7 — NOTIFICATION
+            // =====================================================
 
             !isNotificationStepDone() -> {
-                startStep(7,getStepMessage(7))
+
+                startStep(7, getStepMessage(7))
+
             }
+
+            // =====================================================
+            // STEP 8 — USAGE ACCESS
+            // =====================================================
 
             !isUsageAccessGranted() -> {
-                startStep(8,getStepMessage(8))
+
+                startStep(8, getStepMessage(8))
+
             }
+
+            // =====================================================
+            // STEP 9 — OVERLAY
+            // =====================================================
 
             !Settings.canDrawOverlays(this) -> {
-                startStep(9,getStepMessage(9))
+
+                startStep(9, getStepMessage(9))
+
             }
 
+            // =====================================================
+            // COMPLETE
+            // =====================================================
+
             else -> {
+
                 completeOnboarding()
+
             }
         }
     }
@@ -680,16 +776,15 @@ class SetupWizardActivity : AppCompatActivity() {
         // Step description
         tvStepDescription.text = when (step) {
 
-            1 -> "Required to protect the device from removal."
+            1 -> "Required to provide basic device protection."
             2 -> "Required to filter websites and monitor browsing."
             3 -> "Required to monitor activity and block harmful content."
             4 -> "Required for real-time location tracking."
             5 -> "Required for SMS monitoring."
             6 -> "Required for call activity monitoring."
             7 -> "Required for social media monitoring."
-            8 -> "Required to display blocked content warnings."
-            9 -> "Required to monitor app usage and screen time."
-            10 -> "Required to display blocked content warnings."
+            8 -> "Required to monitor app usage and screen time."
+            9 -> "Required to display blocked content warnings."
             else -> ""
         }
 
@@ -702,13 +797,10 @@ class SetupWizardActivity : AppCompatActivity() {
             4 -> "Allow location access and turn on GPS."
             5 -> "Grant SMS permissions when prompted."
             6 -> "Grant Call permissions when prompted."
-            7 ->  "Tap Continue Setup to enable Notification Access.\n\n" +
-
+            7 -> "Tap Continue Setup to enable Notification Access.\n\n" +
                     "If your phone doesn't support it, you can skip this step."
-
-            8 -> "Allow Display Over Other Apps."
-            9 -> "Enable Usage Access for GuardianIQ."
-            10 -> "Allow Display Over Other Apps."
+            8 -> "Enable Usage Access for ParentIQ."
+            9 -> "Allow Display Over Other Apps."
             else -> ""
         }
 
@@ -812,6 +904,11 @@ class SetupWizardActivity : AppCompatActivity() {
             .putBoolean(KEY_ONBOARDING_DONE, true)
             .apply()
 
+        // Hide launcher icon after onboarding is completed
+        //hideLauncherIcon()
+
+
+
         // ⭐ Save SIM identifier
         val simId = com.parentalcontrol.childapp.utils.SecurityUtils.getSimIdentifier(this)
 
@@ -887,7 +984,7 @@ class SetupWizardActivity : AppCompatActivity() {
 
             Log.e("SETUP", "❌ Failed starting SelfHealingService", e)
         }
-        finish()
+
     }
 
     // ==========================================================
@@ -897,6 +994,12 @@ class SetupWizardActivity : AppCompatActivity() {
     private fun isDeviceAdminEnabled(): Boolean {
         val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         return dpm.isAdminActive(adminComponent)
+    }
+
+    //==========device owner=======
+    private fun isDeviceOwner(): Boolean {
+
+        return ParentIQDevicePolicyManager.isDeviceOwner(this)
     }
 
     /*private fun isVpnGranted(): Boolean {
@@ -1320,7 +1423,7 @@ class SetupWizardActivity : AppCompatActivity() {
             if (enabled) completed++
         }
 
-        add("Enable Device Admin", isDeviceAdminEnabled())
+        add("Device Protection", isDeviceAdminEnabled())
         add("Grant VPN Permission", isVpnGranted())
         add("Enable Accessibility Settings", isAccessibilityEnabled())
         add("Allow GPS Location Permissions", isLocationReady())
@@ -1330,14 +1433,8 @@ class SetupWizardActivity : AppCompatActivity() {
             "Allow Notifications Access / Social Media Monitoring",
             isNotificationStepDone()
         )
-        add(
-            "Allow Overlay Permission",
-            Settings.canDrawOverlays(this)
-        )
-        add(
-            "Allow Usage Access",
-            isUsageAccessGranted()
-        )
+        add("Allow Usage Access", isUsageAccessGranted())
+        add("Allow Overlay Permission", Settings.canDrawOverlays(this))
 
         tvProgressSummary.text =
             "$completed of $total protections enabled"
@@ -1402,5 +1499,25 @@ class SetupWizardActivity : AppCompatActivity() {
             detectCurrentStep()
 
         }, 1000)
+    }
+
+    private fun hideLauncherIcon() {
+        try {
+            val component = ComponentName(
+                this,
+                LauncherActivity::class.java
+            )
+
+            packageManager.setComponentEnabledSetting(
+                component,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+
+            Log.d("SetupWizard", "Launcher icon hidden")
+
+        } catch (e: Exception) {
+            Log.e("SetupWizard", "Failed to hide launcher icon", e)
+        }
     }
 }

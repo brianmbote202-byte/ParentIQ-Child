@@ -191,8 +191,23 @@ object MessageAlertStateManager {
                         TAG,
                         "Alert already active -> " +
                                 "category=$category, " +
-                                "no Firebase write"
+                                "no category Firebase write"
                     )
+
+                    // Make sure the global flag is still correct.
+                    database
+                        .getReference("child_alert_state")
+                        .child(childId)
+                        .child("hasAlert")
+                        .setValue(true)
+                        .addOnFailureListener { error ->
+
+                            Log.e(
+                                TAG,
+                                "Failed to restore hasAlert",
+                                error
+                            )
+                        }
 
                     return@addOnSuccessListener
                 }
