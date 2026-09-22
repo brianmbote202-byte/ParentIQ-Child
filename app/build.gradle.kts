@@ -12,19 +12,20 @@ android {
         applicationId = "com.parentalcontrol.childapp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
     }
 
+
     signingConfigs {
         create("release") {
-            storeFile = file("C:/Projects/ParentalControl/ChildApp/keystore.jks")
-            storePassword = "YOUR_STORE_PASSWORD"
-            keyAlias = "YOUR_KEY_ALIAS"
-            keyPassword = "YOUR_KEY_PASSWORD"
+            storeFile = rootProject.file("parentiq-child-release.jks")
+            storePassword = property("CHILD_STORE_PASSWORD").toString()
+            keyAlias = property("CHILD_KEY_ALIAS").toString()
+            keyPassword = property("CHILD_KEY_PASSWORD").toString()
         }
     }
 

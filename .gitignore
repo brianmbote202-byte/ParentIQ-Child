@@ -22,3 +22,5 @@ app/release/
 # Android signing keys
 *.jks
 *.keystore
+
+gradle.properties

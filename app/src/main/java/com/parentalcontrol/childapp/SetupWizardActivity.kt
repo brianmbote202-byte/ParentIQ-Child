@@ -499,14 +499,14 @@ class SetupWizardActivity : AppCompatActivity() {
             8 -> guideOverlay.show(
                 mainButton,
                 "Usage Access",
-                "Tap continue to allow GuardianIQ to access app usage information."
+                "Tap continue to allow ParentIQ to access app usage information."
             )
 
             // FIXED: Step 9 = Overlay Permission
             9 -> guideOverlay.show(
                 mainButton,
                 "Overlay Permission",
-                "Tap continue to allow GuardianIQ to display over other apps."
+                "Tap continue to allow ParentIQ to display over other apps."
             )
         }
     }
@@ -685,7 +685,7 @@ class SetupWizardActivity : AppCompatActivity() {
 
                 "Notification monitoring is optional.\n\n" +
 
-                        "GuardianIQ will continue setup without it.\n\n" +
+                        "ParentIQ will continue setup without it.\n\n" +
 
                         "You can enable it later from Security Settings."
 
@@ -819,7 +819,7 @@ class SetupWizardActivity : AppCompatActivity() {
 
             .setMessage(
 
-                "GuardianIQ can monitor WhatsApp, Instagram, Snapchat and other apps using Notification Access.\n\n" +
+                "ParentIQ can monitor WhatsApp, Instagram, Snapchat and other apps using Notification Access.\n\n" +
 
                         "Some phones don't support this feature.\n\n" +
 
