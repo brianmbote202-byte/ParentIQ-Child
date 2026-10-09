@@ -2,15 +2,11 @@ package com.parentalcontrol.childapp.worker
 
 import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.util.Log
-import androidx.core.content.ContextCompat
 import androidx.work.Worker
 import androidx.work.WorkerParameters
-import com.parentalcontrol.childapp.service.ScreenTimeService
 import com.parentalcontrol.childapp.service.MonitoringService
-import com.parentalcontrol.childapp.vpn.DnsVpnService
+import com.parentalcontrol.childapp.service.ScreenTimeService
 
 class ServiceHealthWorker(
     context: Context,
@@ -21,141 +17,126 @@ class ServiceHealthWorker(
         private const val TAG = "ServiceHealthWorker"
     }
 
-    // =====================================================
-    // WORK EXECUTION
-    // =====================================================
-
     override fun doWork(): Result {
 
-        Log.e(TAG, "🔥 HEALTH CHECK STARTED")
+        Log.e(TAG, "==================================================")
+        Log.e(TAG, "🔥 SERVICE HEALTH CHECK STARTED")
 
-        try {
+        return try {
 
-            // =====================================
-            // CHECK MONITORING SERVICE
-            // =====================================
+            // =================================================
+            // MONITORING SERVICE
+            // =================================================
 
-            if (!isServiceRunning(MonitoringService::class.java)) {
+            val monitoringRunning =
+                isServiceRunning(
+                    MonitoringService::class.java
+                )
+
+            if (monitoringRunning) {
 
                 Log.e(
                     TAG,
-                    "⚠ MonitoringService NOT running → restarting"
+                    "✅ MonitoringService is running"
                 )
-
-                startServiceSafe(MonitoringService::class.java)
 
             } else {
 
                 Log.e(
                     TAG,
-                    "✅ MonitoringService already running"
+                    "⚠️ MonitoringService is NOT running"
                 )
-            }
-
-            // =====================================
-            // CHECK SCREEN TIME SERVICE
-            // =====================================
-
-            if (!isServiceRunning(ScreenTimeService::class.java)) {
 
                 Log.e(
                     TAG,
-                    "⚠ ScreenTimeService NOT running → restarting"
+                    "ℹ️ Recovery will be handled by the proper recovery path"
+                )
+            }
+
+            // =================================================
+            // SCREEN TIME SERVICE
+            // =================================================
+
+            val screenTimeRunning =
+                isServiceRunning(
+                    ScreenTimeService::class.java
                 )
 
-                startServiceSafe(ScreenTimeService::class.java)
+            if (screenTimeRunning) {
+
+                Log.e(
+                    TAG,
+                    "✅ ScreenTimeService is running"
+                )
 
             } else {
 
                 Log.e(
                     TAG,
-                    "✅ ScreenTimeService already running"
+                    "⚠️ ScreenTimeService is NOT running"
                 )
-            }
-
-            // =====================================
-            // CHECK VPN SERVICE
-            // =====================================
-
-            if (!DnsVpnService.isRunning) {
 
                 Log.e(
                     TAG,
-                    "⚠ VPN NOT running → restarting"
-                )
-
-                startServiceSafe(DnsVpnService::class.java)
-
-            } else {
-
-                Log.e(
-                    TAG,
-                    "✅ VPN already running"
+                    "ℹ️ Recovery will be handled by the proper recovery path"
                 )
             }
 
-            Log.e(TAG, "✅ HEALTH CHECK COMPLETE")
+            // =================================================
+            // VPN
+            // =================================================
+            //
+            // DO NOT use DnsVpnService.isRunning here.
+            //
+            // A static Boolean is lost when the Android process
+            // is killed/recreated.
+            //
+            // VPN recovery needs to be handled by the VPN's
+            // own lifecycle and configuration.
+            //
+            // =================================================
 
-            return Result.success()
+            Log.e(
+                TAG,
+                "ℹ️ VPN health check deferred to VPN-specific recovery"
+            )
+
+            // =================================================
+            // COMPLETE
+            // =================================================
+
+            Log.e(
+                TAG,
+                "✅ SERVICE HEALTH CHECK COMPLETE"
+            )
+
+            Log.e(
+                TAG,
+                "=================================================="
+            )
+
+            Result.success()
 
         } catch (e: Exception) {
 
             Log.e(
                 TAG,
-                "❌ HEALTH CHECK FAILED",
+                "❌ SERVICE HEALTH CHECK FAILED",
                 e
             )
 
-            return Result.retry()
+            Log.e(
+                TAG,
+                "=================================================="
+            )
+
+            Result.retry()
         }
     }
 
-    // =====================================================
-    // SAFE SERVICE STARTER
-    // =====================================================
-
-    private fun startServiceSafe(
-        serviceClass: Class<*>
-    ) {
-
-        try {
-
-            val intent =
-                Intent(
-                    applicationContext,
-                    serviceClass
-                )
-
-            Log.e(
-                TAG,
-                "🚀 Starting ${serviceClass.simpleName}"
-            )
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-                ContextCompat.startForegroundService(
-                    applicationContext,
-                    intent
-                )
-
-            } else {
-
-                applicationContext.startService(intent)
-            }
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ Failed starting ${serviceClass.simpleName}",
-                e
-            )
-        }
-    }
-
-    // =====================================================
-    // CHECK IF SERVICE RUNNING
-    // =====================================================
+    // =========================================================
+    // CHECK SERVICE
+    // =========================================================
 
     private fun isServiceRunning(
         serviceClass: Class<*>
@@ -169,23 +150,18 @@ class ServiceHealthWorker(
                 ) as ActivityManager
 
             @Suppress("DEPRECATION")
-            for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            manager.getRunningServices(Int.MAX_VALUE)
+                .any { serviceInfo ->
 
-                if (serviceClass.name ==
-                    service.service.className
-                ) {
-
-                    return true
+                    serviceInfo.service.className ==
+                            serviceClass.name
                 }
-            }
-
-            false
 
         } catch (e: Exception) {
 
             Log.e(
                 TAG,
-                "❌ Service check failed",
+                "❌ Failed checking ${serviceClass.simpleName}",
                 e
             )
 

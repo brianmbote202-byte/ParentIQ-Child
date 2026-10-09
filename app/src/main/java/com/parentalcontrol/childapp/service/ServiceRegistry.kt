@@ -1,18 +1,22 @@
 package com.parentalcontrol.childapp.service
 
-import kotlin.jvm.java
-
 object ServiceRegistry {
 
+    /**
+     * Services that Guardian may monitor diagnostically.
+     *
+     * IMPORTANT:
+     * Guardian does NOT automatically restart these services.
+     *
+     * VPN has its own dedicated recovery path.
+     * Accessibility and NotificationListener are managed by Android.
+     * MediaProjection requires user authorization.
+     */
     val CORE_SERVICES = listOf(
-        com.parentalcontrol.childapp.service.ScreenTimeService::class.java,
-        com.parentalcontrol.childapp.service.ChildLocationService::class.java,
-        com.parentalcontrol.childapp.vpn.DnsVpnService::class.java,
-        com.parentalcontrol.childapp.service.MonitoringService::class.java,
-
-        com.parentalcontrol.childapp.service.BrowsingTracker::class.java
-        //com.parentalcontrol.childapp.service.BrowserAccessibilityService::class.java
+        ScreenTimeService::class.java,
+        ChildLocationService::class.java,
+        MonitoringService::class.java
     )
 
-    val FOREGROUND_HEALTH_CHECK_INTERVAL = 60_000L
+    const val FOREGROUND_HEALTH_CHECK_INTERVAL = 60_000L
 }

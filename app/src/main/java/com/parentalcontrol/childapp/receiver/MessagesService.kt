@@ -24,12 +24,19 @@ import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
+import android.database.Cursor
+import android.net.Uri
+import android.provider.ContactsContract
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 class MessageService : Service() {
 
     companion object {
 
         private const val TAG = "MessageService"
+
+        const val EXTRA_SMS_DATABASE_ID = "smsDatabaseId"
 
         // ========================================================
         // FOREGROUND SERVICE
@@ -139,6 +146,11 @@ class MessageService : Service() {
         val country: String,
         val simSlot: Int,
         val displayName: String
+    )
+
+    private data class ContactInfo(
+        val name: String,
+        val saved: Boolean
     )
 
     // ============================================================
@@ -536,6 +548,284 @@ class MessageService : Service() {
         )
     }
 
+// ============================================================
+// RESOLVE CONTACT
+// ============================================================
+//
+// Looks up ONLY the SMS participant in the device contacts.
+//
+// The same Kenyan number may be stored as:
+//   +254748441330
+//   0748441330
+//   748441330
+//
+// Therefore we try multiple representations.
+//
+// No contacts are uploaded or enumerated.
+// ============================================================
+
+    private fun resolveContact(
+        phoneNumber: String?
+    ): ContactInfo {
+
+        if (phoneNumber.isNullOrBlank()) {
+
+            return ContactInfo(
+                name = "",
+                saved = false
+            )
+        }
+
+        // ========================================================
+        // PERMISSION
+        // ========================================================
+
+        if (
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.READ_CONTACTS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+
+            Log.w(
+                TAG,
+                "READ_CONTACTS permission not granted"
+            )
+
+            return ContactInfo(
+                name = "",
+                saved = false
+            )
+        }
+
+        // ========================================================
+        // NORMALIZE ORIGINAL NUMBER
+        // ========================================================
+
+        val normalized =
+            normalizeNumber(
+                phoneNumber,
+                UNKNOWN_NUMBER
+            )
+
+        if (
+            normalized == UNKNOWN_NUMBER ||
+            normalized == DEVICE ||
+            normalized.any { it.isLetter() }
+        ) {
+
+            return ContactInfo(
+                name = "",
+                saved = false
+            )
+        }
+
+        // ========================================================
+        // BUILD NUMBER VARIANTS
+        // ========================================================
+
+        val variants =
+            LinkedHashSet<String>()
+
+        // Original normalized value
+        variants.add(normalized)
+
+        // Digits only
+        val digitsOnly =
+            normalized.filter {
+                it.isDigit()
+            }
+
+        if (digitsOnly.isNotBlank()) {
+            variants.add(digitsOnly)
+        }
+
+        // ========================================================
+        // KENYA NUMBER NORMALIZATION
+        // ========================================================
+        //
+        // +254XXXXXXXXX
+        //       ↓
+        // 0XXXXXXXXX
+        //
+        // Also try the reverse:
+        //
+        // 0XXXXXXXXX
+        //       ↓
+        // +254XXXXXXXXX
+        //
+        // This makes contact matching much more reliable
+        // when contacts are saved in local Kenyan format.
+        // ========================================================
+
+        if (
+            digitsOnly.startsWith("254") &&
+            digitsOnly.length >= 10
+        ) {
+
+            val localNumber =
+                "0" +
+                        digitsOnly.substring(3)
+
+            variants.add(localNumber)
+        }
+
+        if (
+            digitsOnly.startsWith("0") &&
+            digitsOnly.length >= 9
+        ) {
+
+            val internationalNumber =
+                "+254" +
+                        digitsOnly.substring(1)
+
+            variants.add(internationalNumber)
+
+            variants.add(
+                internationalNumber.filter {
+                    it.isDigit()
+                }
+            )
+        }
+
+        // ========================================================
+        // LOG VARIANTS
+        // ========================================================
+
+        Log.d(
+            TAG,
+            "CONTACT LOOKUP -> " +
+                    "original=$normalized, " +
+                    "variants=$variants"
+        )
+
+        // ========================================================
+        // LOOKUP EACH VARIANT
+        // ========================================================
+
+        return try {
+
+            for (variant in variants) {
+
+                val contactName =
+                    lookupContactName(
+                        variant
+                    )
+
+                if (contactName.isNotBlank()) {
+
+                    Log.d(
+                        TAG,
+                        "CONTACT FOUND -> " +
+                                "number=$variant, " +
+                                "name=$contactName"
+                    )
+
+                    return ContactInfo(
+                        name = contactName,
+                        saved = true
+                    )
+                }
+            }
+
+            // ====================================================
+            // NOT FOUND
+            // ====================================================
+
+            Log.d(
+                TAG,
+                "CONTACT NOT SAVED -> " +
+                        "number=$normalized, " +
+                        "tried=$variants"
+            )
+
+            ContactInfo(
+                name = "",
+                saved = false
+            )
+
+        } catch (e: SecurityException) {
+
+            Log.w(
+                TAG,
+                "Contact lookup permission denied",
+                e
+            )
+
+            ContactInfo(
+                name = "",
+                saved = false
+            )
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "Contact lookup failed",
+                e
+            )
+
+            ContactInfo(
+                name = "",
+                saved = false
+            )
+        }
+    }
+
+// ============================================================
+// LOOKUP CONTACT NAME
+// ============================================================
+//
+// Performs one PhoneLookup query.
+//
+// Only the requested phone number is queried.
+// ============================================================
+
+    private fun lookupContactName(
+        phoneNumber: String
+    ): String {
+
+        val lookupUri =
+            ContactsContract.PhoneLookup.CONTENT_FILTER_URI
+                .buildUpon()
+                .appendPath(
+                    Uri.encode(phoneNumber)
+                )
+                .build()
+
+        val projection =
+            arrayOf(
+                ContactsContract.PhoneLookup.DISPLAY_NAME
+            )
+
+        contentResolver.query(
+            lookupUri,
+            projection,
+            null,
+            null,
+            null
+        )?.use { cursor ->
+
+            if (cursor.moveToFirst()) {
+
+                val nameIndex =
+                    cursor.getColumnIndex(
+                        ContactsContract.PhoneLookup.DISPLAY_NAME
+                    )
+
+                if (nameIndex >= 0) {
+
+                    return cursor
+                        .getString(nameIndex)
+                        ?.trim()
+                        ?: ""
+                }
+            }
+        }
+
+        return ""
+    }
+
     // ============================================================
     // HANDLE SMS
     // ============================================================
@@ -690,6 +980,43 @@ class MessageService : Service() {
 
             val simDisplayName =
                 simInfo.displayName
+
+            // ====================================================
+            // CONTACT
+            // ====================================================
+
+            // Incoming SMS:
+            //     contact is the sender (`from`)
+            //
+            // Outgoing SMS:
+            //     contact is the recipient (`to`)
+            //
+            // We only look up the SMS participant.
+            // We do NOT read/upload the entire contacts database.
+
+            val contactNumber =
+                if (direction == DIRECTION_INCOMING) {
+                    from
+                } else {
+                    to
+                }
+
+            val contactInfo =
+                resolveContact(contactNumber)
+
+            val contactName =
+                contactInfo.name
+
+            val contactSaved =
+                contactInfo.saved
+
+            Log.d(
+                TAG,
+                "CONTACT -> " +
+                        "number=$contactNumber, " +
+                        "name=${if (contactName.isBlank()) "(none)" else contactName}, " +
+                        "saved=$contactSaved"
+            )
 
             val intentCarrierRaw =
                 intent
@@ -886,16 +1213,78 @@ class MessageService : Service() {
                     .child(FIREBASE_CONVERSATIONS_NODE)
                     .child(conversationId)
 
+// ====================================================
+// FIREBASE MESSAGE REFERENCE
+// ====================================================
+//
+// OUTGOING SMS:
+// Android's SMS database _ID is used as the stable
+// Firebase identity.
+//
+// Example:
+//
+// Android SMS _ID = 481
+// Firebase key   = sms_481
+//
+// If SmsObserver sees SMS 481 again, it writes to
+// the SAME Firebase record instead of creating a
+// second push-key message.
+//
+// INCOMING SMS:
+// Continue using Firebase push keys because the
+// incoming receiver does not currently provide the
+// Android SMS database ID.
+// ====================================================
+
             val messagesListRef =
                 conversationRef
                     .child(FIREBASE_MESSAGES_LIST_NODE)
 
-            val messageRef =
-                messagesListRef.push()
+            val smsDatabaseId =
+                intent.getLongExtra(
+                    EXTRA_SMS_DATABASE_ID,
+                    -1L
+                )
 
-            val messageId =
-                messageRef.key
-                    ?: UUID.randomUUID().toString()
+            val messageRef: DatabaseReference
+
+            val messageId: String
+
+            if (
+                direction == DIRECTION_OUTGOING &&
+                smsDatabaseId > 0L
+            ) {
+
+                messageId =
+                    "sms_$smsDatabaseId"
+
+                messageRef =
+                    messagesListRef
+                        .child(messageId)
+
+                Log.d(
+                    TAG,
+                    "Using stable outgoing SMS Firebase key -> " +
+                            "smsDatabaseId=$smsDatabaseId, " +
+                            "messageId=$messageId"
+                )
+
+            } else {
+
+                messageRef =
+                    messagesListRef.push()
+
+                messageId =
+                    messageRef.key
+                        ?: UUID.randomUUID().toString()
+
+                Log.d(
+                    TAG,
+                    "Using Firebase push key -> " +
+                            "messageId=$messageId"
+                )
+            }
+
 
             // ====================================================
             // RESPONSE DETECTION
@@ -915,6 +1304,8 @@ class MessageService : Service() {
             val messageData =
                 createMessageData(
                     messageId = messageId,
+                    smsDatabaseId =
+                        smsDatabaseId.takeIf { it > 0L },
                     conversationId = conversationId,
                     content = content,
                     direction = direction,
@@ -936,8 +1327,11 @@ class MessageService : Service() {
                     responseToMessageId =
                         responseInfo.responseToMessageId,
                     responseToTimestamp =
-                        responseInfo.responseToTimestamp
+                        responseInfo.responseToTimestamp,
+                    contactName = contactName,
+                    contactSaved = contactSaved
                 )
+
 
             // ====================================================
             // FIREBASE MESSAGE WRITE
@@ -966,6 +1360,12 @@ class MessageService : Service() {
                         conversationRef = conversationRef,
                         messageData = messageData,
                         timestamp = timestamp
+                    )
+                    //===========update conversation contact==========
+                    updateConversationContact(
+                        conversationRef = conversationRef,
+                        contactName = contactName,
+                        contactSaved = contactSaved
                     )
                 }
                 .addOnFailureListener { error ->
@@ -1099,6 +1499,7 @@ class MessageService : Service() {
     private fun createMessageData(
         messageId: String,
         conversationId: String,
+        smsDatabaseId: Long?,
         content: String,
         direction: String,
         from: String,
@@ -1117,11 +1518,14 @@ class MessageService : Service() {
         simDisplayName: String,
         isResponse: Boolean,
         responseToMessageId: String?,
-        responseToTimestamp: Long?
+        responseToTimestamp: Long?,
+        contactName: String,
+        contactSaved: Boolean
     ): HashMap<String, Any?> {
 
         return hashMapOf(
             "messageId" to messageId,
+            "smsDatabaseId" to smsDatabaseId,
             "conversationId" to conversationId,
             "content" to content,
 
@@ -1132,6 +1536,9 @@ class MessageService : Service() {
 
             "fromRaw" to fromRaw,
             "toRaw" to toRaw,
+
+            "contactName" to contactName,
+            "contactSaved" to contactSaved,
 
             "timestamp" to timestamp,
 
@@ -1156,6 +1563,42 @@ class MessageService : Service() {
             "responseToTimestamp" to
                     responseToTimestamp
         )
+    }
+
+    //=============UPDATE CONVO CONTACT===============
+    @SuppressLint("RestrictedApi")
+    private fun updateConversationContact(
+        conversationRef: DatabaseReference,
+        contactName: String,
+        contactSaved: Boolean
+    ) {
+
+        val contactData =
+            hashMapOf<String, Any?>(
+                "contactName" to contactName,
+                "contactSaved" to contactSaved
+            )
+
+        conversationRef
+            .updateChildren(contactData)
+            .addOnSuccessListener {
+
+                Log.d(
+                    TAG,
+                    "CONVERSATION CONTACT UPDATED -> " +
+                            "${conversationRef.path}, " +
+                            "name=$contactName, " +
+                            "saved=$contactSaved"
+                )
+            }
+            .addOnFailureListener { error ->
+
+                Log.e(
+                    TAG,
+                    "CONVERSATION CONTACT UPDATE FAILED",
+                    error
+                )
+            }
     }
 
     // ============================================================

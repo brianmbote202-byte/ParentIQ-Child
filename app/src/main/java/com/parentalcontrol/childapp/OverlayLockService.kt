@@ -2,6 +2,7 @@ package com.parentalcontrol.childapp
 
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -15,12 +16,14 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import com.google.firebase.database.FirebaseDatabase
-import java.util.*
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
-import android.app.NotificationManager
+import java.util.Calendar
+import java.util.Locale
+import java.util.Timer
+import java.util.TimerTask
 
 
 class OverlayLockService : Service() {
@@ -28,6 +31,17 @@ class OverlayLockService : Service() {
     private var overlayView: View? = null
 
     private var approvalListener: ValueEventListener? = null
+
+    // Firebase:
+    // rules/{childId}/endScreenTime
+    //
+    // Stored as seconds since midnight.
+    //
+    // Example:
+    // 41700 = 11:35 PM
+    private var firebaseEndScreenTimeSeconds: Long? = null
+
+    private var countdownTimer: Timer? = null
 
     companion object {
         var isRunning = false
@@ -37,11 +51,24 @@ class OverlayLockService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        Log.d(
+            "OVERLAY_SERVICE",
+            "🚀 OverlayLockService onCreate()"
+        )
+
         startAsForeground()
 
         isRunning = true
 
+        // =====================================
+        // LOAD FIREBASE SCREEN-TIME RULE
+        // =====================================
 
+        listenForEndScreenTime()
+
+        // =====================================
+        // WINDOW MANAGER
+        // =====================================
 
         val windowManager =
             getSystemService(WINDOW_SERVICE)
@@ -96,134 +123,31 @@ class OverlayLockService : Service() {
         }
 
         // =====================================
-        // CLOSE BUTTON
+        // LIVE CLOCK + COUNTDOWN
         // =====================================
 
+        countdownTimer =
+            Timer("ScreenTimeCountdown")
 
-        // =====================================
-        // EXIT BUTTON
-        // =====================================
-
-
-
-        // =====================================
-        // LIVE COUNTDOWN
-        // =====================================
-
-        Timer().scheduleAtFixedRate(
+        countdownTimer?.scheduleAtFixedRate(
             object : TimerTask() {
 
                 override fun run() {
 
                     countdown.post {
 
-                        val cal = Calendar.getInstance()
-
-                        val hour =
-                            cal.get(Calendar.HOUR_OF_DAY)
-
-                        val minute =
-                            cal.get(Calendar.MINUTE)
-
-                        val second =
-                            cal.get(Calendar.SECOND)
-
-                        // CURRENT TIME
-                        val currentCalendar =
-                            Calendar.getInstance()
-
-                        val currentTime =
-                            android.text.format.DateFormat.format(
-                                "hh:mm:ss a",
-                                currentCalendar
-                            ).toString()
-                        countdown.text =
-                            "Current Time • $currentTime"
-
-                        // =====================================
-                        // GET END SCREEN TIME
-                        // =====================================
-
-                        val prefs = getSharedPreferences(
-                            "screen_time_prefs",
-                            MODE_PRIVATE
+                        updateTimeDisplay(
+                            countdown = countdown,
+                            unlockTimeText = unlockTimeText,
+                            timeRemainingText = timeRemainingText
                         )
-
-                        val unlockHour =
-                            prefs.getInt("end_hour", 20)
-
-                        val unlockMinute =
-                            prefs.getInt("end_minute", 0)
-
-                        // =====================================
-                        // UNLOCK TIME TEXT
-                        // =====================================
-
-                        val unlockCalendar =
-                            Calendar.getInstance()
-
-                        unlockCalendar.set(
-                            Calendar.HOUR_OF_DAY,
-                            unlockHour
-                        )
-
-                        unlockCalendar.set(
-                            Calendar.MINUTE,
-                            unlockMinute
-                        )
-
-                        val unlockFormatted =
-                            android.text.format.DateFormat.format(
-                                "hh:mm a",
-                                unlockCalendar
-                            ).toString()
-
-                        unlockTimeText.text =
-                            "Unlocks At • $unlockFormatted"
-
-                        // =====================================
-                        // REMAINING TIME
-                        // =====================================
-
-                        val currentSeconds =
-                            hour * 3600 +
-                                    minute * 60 +
-                                    second
-
-                        val unlockSeconds =
-                            unlockHour * 3600 +
-                                    unlockMinute * 60
-
-                        var remaining =
-                            unlockSeconds - currentSeconds
-
-                        if (remaining < 0) {
-                            remaining = 0
-                        }
-
-                        val remHours =
-                            remaining / 3600
-
-                        val remMinutes =
-                            (remaining % 3600) / 60
-
-                        val remSeconds =
-                            remaining % 60
-
-                        timeRemainingText.text =
-                            String.format(
-                                "Time Remaining • %02dh %02dm %02ds",
-                                remHours,
-                                remMinutes,
-                                remSeconds
-                            )
                     }
                 }
-
             },
             0,
             1000
         )
+
         // =====================================
         // OVERLAY PARAMS
         // =====================================
@@ -253,6 +177,11 @@ class OverlayLockService : Service() {
             overlayView,
             params
         )
+
+        // =====================================
+        // LISTEN FOR PARENT APPROVAL
+        // =====================================
+
         listenForApprovals()
 
         Log.d(
@@ -261,9 +190,266 @@ class OverlayLockService : Service() {
         )
     }
 
-    // =====================================
+    // =========================================================
+    // FIREBASE END SCREEN TIME
+    // =========================================================
+
+    private fun listenForEndScreenTime() {
+
+        val prefs = getSharedPreferences(
+            "child_prefs",
+            MODE_PRIVATE
+        )
+
+        val childId = prefs.getString(
+            "child_id",
+            null
+        )
+
+        if (childId.isNullOrBlank()) {
+            Log.e(
+                "SCREEN_TIME",
+                "❌ Cannot load endScreenTime - child ID missing"
+            )
+            return
+        }
+
+        val endScreenTimeRef = FirebaseDatabase.getInstance()
+            .getReference("rules")
+            .child(childId)
+            .child("endScreenTime")
+
+        Log.d(
+            "SCREEN_TIME",
+            "📡 Listening to: rules/$childId/endScreenTime"
+        )
+
+        endScreenTimeRef.addValueEventListener(
+            object : ValueEventListener {
+
+                override fun onDataChange(
+                    snapshot: DataSnapshot
+                ) {
+
+                    val endSeconds =
+                        snapshot.getValue(Long::class.java)
+
+                    if (endSeconds == null) {
+
+                        Log.e(
+                            "SCREEN_TIME",
+                            "❌ endScreenTime does not exist"
+                        )
+
+                        firebaseEndScreenTimeSeconds = null
+
+                        return
+                    }
+
+                    firebaseEndScreenTimeSeconds = endSeconds
+
+                    val formattedTime =
+                        formatFirebaseTime(endSeconds)
+
+                    Log.d(
+                        "SCREEN_TIME",
+                        "✅ Firebase endScreenTime = $endSeconds"
+                    )
+
+                    Log.d(
+                        "SCREEN_TIME",
+                        "🕐 Unlocks At = $formattedTime"
+                    )
+                }
+
+                override fun onCancelled(
+                    error: DatabaseError
+                ) {
+
+                    Log.e(
+                        "SCREEN_TIME",
+                        "❌ Failed reading endScreenTime",
+                        error.toException()
+                    )
+                }
+            }
+        )
+    }
+
+    // =========================================================
+    // UPDATE CURRENT TIME / UNLOCK TIME / REMAINING TIME
+    // =========================================================
+
+    private fun updateTimeDisplay(
+        countdown: TextView,
+        unlockTimeText: TextView,
+        timeRemainingText: TextView
+    ) {
+
+        val now =
+            Calendar.getInstance()
+
+        // =====================================
+        // CURRENT TIME
+        // =====================================
+
+        val currentTime =
+            android.text.format.DateFormat.format(
+                "hh:mm:ss a",
+                now
+            ).toString()
+
+        countdown.text =
+            "Current Time • $currentTime"
+
+        // =====================================
+        // GET FIREBASE END TIME
+        // =====================================
+
+        val endSeconds =
+            firebaseEndScreenTimeSeconds
+
+        if (endSeconds == null) {
+
+            unlockTimeText.text =
+                "Unlocks At • Loading..."
+
+            timeRemainingText.text =
+                "Time Remaining • --h --m --s"
+
+            return
+        }
+
+        // =====================================
+        // UNLOCK TIME
+        // =====================================
+
+        val unlockFormatted =
+            formatFirebaseTime(
+                endSeconds
+            )
+
+        unlockTimeText.text =
+            "Unlocks At • $unlockFormatted"
+
+        // =====================================
+        // CURRENT TIME IN SECONDS
+        // =====================================
+
+        val currentHour =
+            now.get(Calendar.HOUR_OF_DAY)
+
+        val currentMinute =
+            now.get(Calendar.MINUTE)
+
+        val currentSecond =
+            now.get(Calendar.SECOND)
+
+        val currentSeconds =
+            currentHour * 3600L +
+                    currentMinute * 60L +
+                    currentSecond
+
+        // =====================================
+        // FIREBASE END TIME IN SECONDS
+        // =====================================
+
+        val unlockSeconds =
+            endSeconds % (24L * 60L * 60L)
+
+        // =====================================
+        // CALCULATE REMAINING
+        // =====================================
+
+        var remaining =
+            unlockSeconds - currentSeconds
+
+        /*
+         * If the configured unlock time has already
+         * passed today, use the next occurrence.
+         */
+        if (remaining < 0) {
+
+            remaining +=
+                24L * 60L * 60L
+        }
+
+        // =====================================
+        // FORMAT REMAINING
+        // =====================================
+
+        val remHours =
+            remaining / 3600
+
+        val remMinutes =
+            (remaining % 3600) / 60
+
+        val remSeconds =
+            remaining % 60
+
+        timeRemainingText.text =
+            String.format(
+                Locale.getDefault(),
+                "Time Remaining • %02dh %02dm %02ds",
+                remHours,
+                remMinutes,
+                remSeconds
+            )
+    }
+
+    // =========================================================
+    // CONVERT FIREBASE SECONDS → 12-HOUR TIME
+    // =========================================================
+
+    private fun formatFirebaseTime(
+        secondsSinceMidnight: Long
+    ): String {
+
+        val secondsInDay =
+            24L * 60L * 60L
+
+        val totalSeconds =
+            secondsSinceMidnight % secondsInDay
+
+        val hour =
+            (totalSeconds / 3600).toInt()
+
+        val minute =
+            ((totalSeconds % 3600) / 60).toInt()
+
+        val calendar =
+            Calendar.getInstance()
+
+        calendar.set(
+            Calendar.HOUR_OF_DAY,
+            hour
+        )
+
+        calendar.set(
+            Calendar.MINUTE,
+            minute
+        )
+
+        calendar.set(
+            Calendar.SECOND,
+            0
+        )
+
+        calendar.set(
+            Calendar.MILLISECOND,
+            0
+        )
+
+        return android.text.format.DateFormat.format(
+            "h:mm a",
+            calendar
+        ).toString()
+    }
+
+    // =========================================================
     // FIREBASE REQUEST
-    // =====================================
+    // =========================================================
+
     private fun requestExtraTime(
         minutes: Int
     ) {
@@ -273,10 +459,11 @@ class OverlayLockService : Service() {
             MODE_PRIVATE
         )
 
-        val childId = prefs.getString(
-            "child_id",
-            "unknown_child"
-        ) ?: "unknown_child"
+        val childId =
+            prefs.getString(
+                "child_id",
+                "unknown_child"
+            ) ?: "unknown_child"
 
         Log.d(
             "REQUEST_TIME",
@@ -294,13 +481,14 @@ class OverlayLockService : Service() {
             return
         }
 
-        val requestsRef = FirebaseDatabase.getInstance()
-            .reference
-            .child("requests")
-            .child(childId)
+        val requestsRef =
+            FirebaseDatabase.getInstance()
+                .reference
+                .child("requests")
+                .child(childId)
 
         // =====================================
-        // CHECK FOR EXISTING PENDING REQUEST
+        // CHECK EXISTING PENDING REQUEST
         // =====================================
 
         requestsRef.get()
@@ -311,11 +499,13 @@ class OverlayLockService : Service() {
 
                 for (snap in snapshot.children) {
 
-                    val type = snap.child("type")
-                        .getValue(String::class.java)
+                    val type =
+                        snap.child("type")
+                            .getValue(String::class.java)
 
-                    val status = snap.child("status")
-                        .getValue(String::class.java)
+                    val status =
+                        snap.child("status")
+                            .getValue(String::class.java)
 
                     if (
                         type == "extra_time" &&
@@ -323,12 +513,13 @@ class OverlayLockService : Service() {
                     ) {
 
                         hasPendingRequest = true
+
                         break
                     }
                 }
 
                 // =====================================
-                // BLOCK DUPLICATE REQUESTS
+                // BLOCK DUPLICATE REQUEST
                 // =====================================
 
                 if (hasPendingRequest) {
@@ -348,25 +539,29 @@ class OverlayLockService : Service() {
                 }
 
                 // =====================================
-                // CREATE NEW REQUEST
+                // CREATE REQUEST
                 // =====================================
 
-                val requestId = requestsRef
-                    .push()
-                    .key ?: return@addOnSuccessListener
+                val requestId =
+                    requestsRef
+                        .push()
+                        .key
+                        ?: return@addOnSuccessListener
 
-                val requestData = mapOf(
+                val requestData =
+                    mapOf(
 
-                    "requestId" to requestId,
+                        "requestId" to requestId,
 
-                    "type" to "extra_time",
+                        "type" to "extra_time",
 
-                    "minutes" to minutes,
+                        "minutes" to minutes,
 
-                    "status" to "pending",
+                        "status" to "pending",
 
-                    "timestamp" to System.currentTimeMillis()
-                )
+                        "timestamp" to
+                                System.currentTimeMillis()
+                    )
 
                 requestsRef
                     .child(requestId)
@@ -385,8 +580,7 @@ class OverlayLockService : Service() {
                             Toast.LENGTH_SHORT
                         ).show()
 
-                        // OPTIONAL:
-                        // disable button after request
+                        // Disable until parent responds.
                         overlayView
                             ?.findViewById<Button>(
                                 R.id.btnRequestMoreTime
@@ -420,17 +614,23 @@ class OverlayLockService : Service() {
             }
     }
 
+    // =========================================================
+    // LISTEN FOR PARENT APPROVAL
+    // =========================================================
+
     private fun listenForApprovals() {
 
-        val prefs = getSharedPreferences(
-            "child_prefs",
-            MODE_PRIVATE
-        )
+        val prefs =
+            getSharedPreferences(
+                "child_prefs",
+                MODE_PRIVATE
+            )
 
-        val childId = prefs.getString(
-            "child_id",
-            "unknown_child"
-        ) ?: "unknown_child"
+        val childId =
+            prefs.getString(
+                "child_id",
+                "unknown_child"
+            ) ?: "unknown_child"
 
         if (childId == "unknown_child") {
 
@@ -447,14 +647,12 @@ class OverlayLockService : Service() {
             "👶 Listening for childId = $childId"
         )
 
-        FirebaseDatabase.getInstance()
-            .reference
-            .child("requests")
-            .child(childId)
+        approvalListener =
+            object : ValueEventListener {
 
-            .addValueEventListener(object : ValueEventListener {
-
-                override fun onDataChange(snapshot: DataSnapshot) {
+                override fun onDataChange(
+                    snapshot: DataSnapshot
+                ) {
 
                     Log.d(
                         "APPROVAL_LISTENER",
@@ -463,9 +661,10 @@ class OverlayLockService : Service() {
 
                     for (snap in snapshot.children) {
 
-                        val status = snap.child("status")
-                            .getValue(String::class.java)
-                            ?: continue
+                        val status =
+                            snap.child("status")
+                                .getValue(String::class.java)
+                                ?: continue
 
                         Log.d(
                             "APPROVAL_LISTENER",
@@ -474,14 +673,19 @@ class OverlayLockService : Service() {
 
                         if (status == "approved") {
 
-                            val minutes = snap.child("minutes")
-                                .getValue(Int::class.java)
-                                ?: 15
+                            val minutes =
+                                snap.child("minutes")
+                                    .getValue(Int::class.java)
+                                    ?: 15
 
                             Log.d(
                                 "APPROVAL_LISTENER",
                                 "✅ APPROVED FOR $minutes MINUTES"
                             )
+
+                            // =====================================
+                            // GRANT EXTRA TIME
+                            // =====================================
 
                             grantExtraTime(minutes)
 
@@ -489,7 +693,8 @@ class OverlayLockService : Service() {
                             // MARK REQUEST AS USED
                             // =====================================
 
-                            snap.ref.child("status")
+                            snap.ref
+                                .child("status")
                                 .setValue("used")
 
                             Toast.makeText(
@@ -498,6 +703,10 @@ class OverlayLockService : Service() {
                                 Toast.LENGTH_LONG
                             ).show()
 
+                            // =====================================
+                            // REMOVE LOCK
+                            // =====================================
+
                             stopOverlay()
 
                             break
@@ -505,7 +714,9 @@ class OverlayLockService : Service() {
                     }
                 }
 
-                override fun onCancelled(error: DatabaseError) {
+                override fun onCancelled(
+                    error: DatabaseError
+                ) {
 
                     Log.e(
                         "APPROVAL_LISTENER",
@@ -513,45 +724,37 @@ class OverlayLockService : Service() {
                         error.toException()
                     )
                 }
-            })
+            }
+
+        FirebaseDatabase.getInstance()
+            .reference
+            .child("requests")
+            .child(childId)
+            .addValueEventListener(
+                approvalListener!!
+            )
     }
 
-    //===========extra time granted=======
-    /*private fun grantExtraTime(minutes: Int) {
+    // =========================================================
+    // GRANT EXTRA TIME
+    // =========================================================
 
-        val prefs = getSharedPreferences(
-            "screen_time_prefs",
-            MODE_PRIVATE
-        )
+    private fun grantExtraTime(
+        minutes: Int
+    ) {
 
-        val extraUntil =
-            System.currentTimeMillis() +
-                    (minutes * 60 * 1000)
-
-        prefs.edit()
-            .putLong(
-                "extra_time_until",
-                extraUntil
+        val prefs =
+            getSharedPreferences(
+                "screen_time_prefs",
+                MODE_PRIVATE
             )
-            .apply()
-
-        Log.d(
-            "EXTRA_TIME",
-            "✅ Extra time active until: $extraUntil"
-        )
-    }*/
-    private fun grantExtraTime(minutes: Int) {
-
-        val prefs = getSharedPreferences(
-            "screen_time_prefs",
-            MODE_PRIVATE
-        )
 
         val now =
             System.currentTimeMillis()
 
         val extraUntil =
-            now + (minutes * 60 * 1000)
+            now +
+                    (minutes * 60 * 1000L)
 
         prefs.edit()
             .putLong(
@@ -566,43 +769,109 @@ class OverlayLockService : Service() {
         )
     }
 
+    // =========================================================
+    // FOREGROUND SERVICE
+    // =========================================================
+
     private fun startAsForeground() {
 
-        val channelId = "overlay_lock_channel"
+        val channelId =
+            "overlay_lock_channel"
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (
+            android.os.Build.VERSION.SDK_INT >=
+            android.os.Build.VERSION_CODES.O
+        ) {
 
-            val channel = NotificationChannel(
-                channelId,
-                "Screen Lock",
-                NotificationManager.IMPORTANCE_LOW
+            val channel =
+                NotificationChannel(
+                    channelId,
+                    "Screen Lock",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+
+            val manager =
+                getSystemService(
+                    NotificationManager::class.java
+                )
+
+            manager.createNotificationChannel(
+                channel
             )
-
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
         }
 
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("Screen Lock Active")
-            .setContentText("Monitoring screen time...")
-            .setOngoing(true)
-            .build()
+        val notification =
+            NotificationCompat.Builder(
+                this,
+                channelId
+            )
+                .setSmallIcon(
+                    android.R.drawable.ic_lock_lock
+                )
+                .setContentTitle(
+                    "Screen Lock Active"
+                )
+                .setContentText(
+                    "Monitoring screen time..."
+                )
+                .setOngoing(true)
+                .build()
 
-        startForeground(1002, notification)
+        startForeground(
+            1002,
+            notification
+        )
     }
-    //stop lock overlay
+
+    // =========================================================
+    // STOP OVERLAY
+    // =========================================================
+
     private fun stopOverlay() {
 
         try {
 
+            countdownTimer?.cancel()
+            countdownTimer = null
+
+            if (approvalListener != null) {
+
+                val prefs =
+                    getSharedPreferences(
+                        "child_prefs",
+                        MODE_PRIVATE
+                    )
+
+                val childId =
+                    prefs.getString(
+                        "child_id",
+                        null
+                    )
+
+                if (!childId.isNullOrBlank()) {
+
+                    FirebaseDatabase.getInstance()
+                        .reference
+                        .child("requests")
+                        .child(childId)
+                        .removeEventListener(
+                            approvalListener!!
+                        )
+                }
+
+                approvalListener = null
+            }
+
             if (overlayView != null) {
 
                 val windowManager =
-                    getSystemService(WINDOW_SERVICE)
-                            as WindowManager
+                    getSystemService(
+                        WINDOW_SERVICE
+                    ) as WindowManager
 
-                windowManager.removeView(overlayView)
+                windowManager.removeView(
+                    overlayView
+                )
 
                 overlayView = null
             }
@@ -626,26 +895,91 @@ class OverlayLockService : Service() {
         )
     }
 
+    // =========================================================
+    // SERVICE DESTROYED
+    // =========================================================
 
     override fun onDestroy() {
-        super.onDestroy()
+
+        Log.d(
+            "OVERLAY_SERVICE",
+            "🛑 OverlayLockService onDestroy()"
+        )
+
+        countdownTimer?.cancel()
+        countdownTimer = null
+
+        // Remove Firebase approval listener.
+        try {
+
+            if (approvalListener != null) {
+
+                val prefs =
+                    getSharedPreferences(
+                        "child_prefs",
+                        MODE_PRIVATE
+                    )
+
+                val childId =
+                    prefs.getString(
+                        "child_id",
+                        null
+                    )
+
+                if (!childId.isNullOrBlank()) {
+
+                    FirebaseDatabase.getInstance()
+                        .reference
+                        .child("requests")
+                        .child(childId)
+                        .removeEventListener(
+                            approvalListener!!
+                        )
+                }
+
+                approvalListener = null
+
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(
+                "APPROVAL_LISTENER",
+                "❌ Failed removing listener",
+                e
+            )
+        }
+
+        // Remove overlay.
+        try {
+
+            if (overlayView != null) {
+
+                val windowManager =
+                    getSystemService(
+                        WINDOW_SERVICE
+                    ) as WindowManager
+
+                windowManager.removeView(
+                    overlayView
+                )
+
+                overlayView = null
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(
+                "OVERLAY_SERVICE",
+                "❌ Failed removing overlay on destroy",
+                e
+            )
+        }
 
         isRunning = false
 
-        if (overlayView != null) {
-
-            val windowManager =
-                getSystemService(WINDOW_SERVICE)
-                        as WindowManager
-
-            windowManager.removeView(
-                overlayView
-            )
-        }
+        super.onDestroy()
     }
-
-    //listen for approvals
-
 
     override fun onBind(
         intent: Intent?

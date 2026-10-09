@@ -9,98 +9,115 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.parentalcontrol.childapp.R
-import com.parentalcontrol.childapp.accessibility.BrowserAccessibilityService
 import com.parentalcontrol.childapp.setup.AccessibilityUtils
-import com.parentalcontrol.childapp.vpn.VpnController
+import com.parentalcontrol.childapp.vpn.DnsVpnService
 
 class SelfHealingService : Service() {
 
     companion object {
-        private const val TAG = "SelfHealingService"
+
+        private const val TAG =
+            "SelfHealingService"
 
         private const val CHANNEL_ID =
             "self_heal_channel"
 
-        private const val NOTIFICATION_ID = 2001
+        private const val NOTIFICATION_ID =
+            2001
+
+        private const val CHECK_INTERVAL =
+            10_000L
     }
+
+    // ============================================================
+    // HANDLER
+    // ============================================================
 
     private val handler =
         Handler(Looper.getMainLooper())
 
-    private val interval = 10_000L
+    private var monitoringStarted = false
+
+    // ============================================================
+    // HEALTH CHECK
+    // ============================================================
 
     private val checkRunnable =
         object : Runnable {
 
             override fun run() {
 
+                if (!monitoringStarted) {
+                    return
+                }
+
                 try {
-
-                    val enabled =
-                        AccessibilityUtils.isAccessibilityEnabled(
-                            applicationContext
-                        )
-
-                    Log.e(
-                        TAG,
-                        "👁 Accessibility = $enabled"
-                    )
-
-                    if (!enabled) {
-                        triggerRecovery()
-                    }
-
+                    checkAccessibility()
                 } catch (e: Exception) {
 
                     Log.e(
                         TAG,
-                        "❌ Self-heal check failed",
+                        "❌ Accessibility health check failed",
                         e
                     )
                 }
 
-                if (!com.parentalcontrol.childapp.vpn.DnsVpnService.isRunning) {
+                try {
+                    checkVpn()
+                } catch (e: Exception) {
 
-                    Log.e(TAG, "⚠ VPN OFF → restarting")
-
-                    try {
-
-                        VpnController.startVpn(applicationContext)
-
-                    } catch (e: Exception) {
-
-                        Log.e(TAG, "❌ VPN restart failed", e)
-                    }
+                    Log.e(
+                        TAG,
+                        "❌ VPN health check failed",
+                        e
+                    )
                 }
 
                 handler.postDelayed(
                     this,
-                    interval
+                    CHECK_INTERVAL
                 )
             }
         }
 
-    // =====================================================
+    // ============================================================
     // CREATE
-    // =====================================================
+    // ============================================================
 
     override fun onCreate() {
+
         super.onCreate()
 
-        Log.e(TAG, "🔥 SelfHealingService CREATED")
+        Log.e(
+            TAG,
+            "=================================================="
+        )
+
+        Log.e(
+            TAG,
+            "🔥 SelfHealingService CREATED"
+        )
+
+        Log.e(
+            TAG,
+            "=================================================="
+        )
 
         startForegroundSafe()
+
+        monitoringStarted = true
+
+        handler.removeCallbacks(checkRunnable)
 
         handler.post(checkRunnable)
     }
 
-    // =====================================================
+    // ============================================================
     // START COMMAND
-    // =====================================================
+    // ============================================================
 
     override fun onStartCommand(
         intent: Intent?,
@@ -108,86 +125,118 @@ class SelfHealingService : Service() {
         startId: Int
     ): Int {
 
-        Log.e(TAG, "🚀 SelfHealingService STARTED")
+        Log.e(
+            TAG,
+            "🚀 SelfHealingService STARTED"
+        )
+
+        /*
+         * START_STICKY allows Android to recreate this service
+         * if its process is killed.
+         *
+         * Boot recovery itself is handled by:
+         *
+         * BootReceiver
+         *      ↓
+         * SystemBootOrchestrator
+         */
 
         return START_STICKY
     }
 
-    // =====================================================
-    // RECOVERY LOGIC
-    // =====================================================
+    // ============================================================
+    // ACCESSIBILITY HEALTH
+    // ============================================================
 
-    private fun triggerRecovery() {
+    private fun checkAccessibility() {
 
-        Log.e(
-            TAG,
-            "⚠ Accessibility OFF → recovering system"
-        )
+        val enabled =
+            try {
 
-        // Restart VPN safely
-        try {
+                AccessibilityUtils
+                    .isAccessibilityEnabled(
+                        applicationContext
+                    )
 
-            VpnController.startVpn(
-                applicationContext
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "❌ Could not determine Accessibility state",
+                    e
+                )
+
+                return
+            }
+
+        if (enabled) {
+
+            Log.d(
+                TAG,
+                "👁 Accessibility = ENABLED"
             )
+
+        } else {
 
             Log.e(
                 TAG,
-                "✅ VPN restart requested"
+                "⚠️ Accessibility = DISABLED"
             )
 
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ VPN restart failed",
-                e
-            )
-        }
-
-        // Open accessibility settings
-        try {
-
-            val intent =
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-
-            intent.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK
-            )
-
-            startActivity(intent)
-
-            Log.e(
-                TAG,
-                "⚙ Opened accessibility settings"
-            )
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ Failed opening accessibility settings",
-                e
-            )
-        }
-
-        try {
-
-            val intent = Intent(
-                Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-            )
-
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-            startActivity(intent)
-
-        } catch (_: Exception) {
+            /*
+             * IMPORTANT:
+             *
+             * We deliberately DO NOT open
+             * ACTION_ACCESSIBILITY_SETTINGS here.
+             *
+             * Accessibility cannot safely be forced on by
+             * starting BrowserAccessibilityService ourselves.
+             *
+             * If the user has enabled the service, Android's
+             * Accessibility framework is responsible for
+             * reconnecting BrowserAccessibilityService.
+             */
         }
     }
 
-    // =====================================================
+    // ============================================================
+    // VPN HEALTH
+    // ============================================================
+
+    private fun checkVpn() {
+
+        val running =
+            DnsVpnService.isRunning
+
+        if (running) {
+
+            Log.d(
+                TAG,
+                "🌐 VPN = RUNNING"
+            )
+
+        } else {
+
+            Log.e(
+                TAG,
+                "⚠️ VPN = NOT RUNNING"
+            )
+
+            /*
+             * Do NOT call VpnController.startVpn() here.
+             *
+             * SystemBootOrchestrator is now the central VPN
+             * startup/recovery mechanism.
+             *
+             * Calling VpnController from here as well would
+             * create competing VPN startup paths.
+             */
+        }
+    }
+
+    // ============================================================
     // FOREGROUND NOTIFICATION
-    // =====================================================
+    // ============================================================
 
     private fun startForegroundSafe() {
 
@@ -196,7 +245,10 @@ class SelfHealingService : Service() {
                 NotificationManager::class.java
             )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
 
             val channel =
                 NotificationChannel(
@@ -206,9 +258,11 @@ class SelfHealingService : Service() {
                 )
 
             channel.description =
-                "Keeps monitoring services alive"
+                "Monitors child protection services"
 
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(
+                channel
+            )
         }
 
         val notification: Notification =
@@ -216,39 +270,60 @@ class SelfHealingService : Service() {
                 this,
                 CHANNEL_ID
             )
-                .setSmallIcon(R.drawable.ic_vpn)
+                .setSmallIcon(
+                    R.drawable.ic_vpn
+                )
                 .setContentTitle(
                     "Protection Active"
                 )
                 .setContentText(
-                    "Monitoring system integrity"
+                    "Monitoring protection services"
                 )
                 .setOngoing(true)
+                .setPriority(
+                    NotificationCompat.PRIORITY_LOW
+                )
                 .build()
 
         startForeground(
             NOTIFICATION_ID,
             notification
         )
+
+        Log.d(
+            TAG,
+            "✅ Self-healing foreground service active"
+        )
     }
 
-    // =====================================================
+    // ============================================================
     // DESTROY
-    // =====================================================
+    // ============================================================
 
     override fun onDestroy() {
+
+        Log.e(
+            TAG,
+            "💀 SelfHealingService DESTROYED"
+        )
+
+        monitoringStarted = false
+
+        handler.removeCallbacksAndMessages(
+            null
+        )
+
         super.onDestroy()
-
-        Log.e(TAG, "💀 SelfHealingService DESTROYED")
-
-        handler.removeCallbacksAndMessages(null)
     }
 
-    // =====================================================
+    // ============================================================
     // BIND
-    // =====================================================
+    // ============================================================
 
-    override fun onBind(intent: Intent?): IBinder? {
+    override fun onBind(
+        intent: Intent?
+    ): IBinder? {
+
         return null
     }
 }

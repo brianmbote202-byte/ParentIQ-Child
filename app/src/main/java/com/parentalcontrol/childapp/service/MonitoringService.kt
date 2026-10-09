@@ -154,9 +154,26 @@ class MonitoringService : Service() {
         startMonitoringLoop()
 
         /*
-         * Start app synchronization.
+         * IMPORTANT:
+         *
+         * AppSyncService is NO LONGER started here.
+         *
+         * App synchronization is now handled by:
+         *
+         *     AppSyncWorker
+         *
+         * through WorkManager.
+         *
+         * This prevents MonitoringService from launching the
+         * old dataSync foreground service and keeps finite app
+         * synchronization separate from the continuous
+         * monitoring lifecycle.
          */
-        startAppSyncService()
+
+        Log.d(
+            TAG,
+            "ℹ️ App synchronization is handled by AppSyncWorker"
+        )
 
         Log.d(
             TAG,
@@ -727,37 +744,6 @@ class MonitoringService : Service() {
     }
 
     // ============================================================
-    // APP SYNC
-    // ============================================================
-
-    private fun startAppSyncService() {
-
-        try {
-
-            Log.d(
-                TAG,
-                "🔄 Starting AppSyncService"
-            )
-
-            ContextCompat.startForegroundService(
-                this,
-                Intent(
-                    this,
-                    AppSyncService::class.java
-                )
-            )
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ Failed to start AppSyncService",
-                e
-            )
-        }
-    }
-
-    // ============================================================
     // SERVICE DESTROY
     // ============================================================
 
@@ -816,4 +802,3 @@ class MonitoringService : Service() {
         intent: Intent?
     ): IBinder? = null
 }
-

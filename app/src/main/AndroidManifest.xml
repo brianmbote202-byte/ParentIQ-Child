@@ -7,95 +7,180 @@
     <!-- CORE PERMISSIONS -->
     <!-- ===================================================== -->
 
-    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission
+        android:name="android.permission.INTERNET" />
 
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission
+        android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- ===================================================== -->
+    <!-- CONNECTED DEVICE -->
+    <!-- ===================================================== -->
+
+    <!-- Keep only ONE declaration -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <!-- ===================================================== -->
+    <!-- PACKAGE / SYSTEM ACCESS -->
+    <!-- ===================================================== -->
 
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission"/>
+        tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
 
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission
+        android:name="android.permission.WAKE_LOCK" />
 
-    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES"/>
+    <uses-permission
+        android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- ===================================================== -->
     <!-- OVERLAY -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"
+    <!-- ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <uses-permission
+        android:name="android.permission.USE_FULL_SCREEN_INTENT"
         tools:ignore="FullScreenIntentPolicy" />
 
+    <!-- ===================================================== -->
     <!-- USAGE STATS -->
+    <!-- ===================================================== -->
+
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions"/>
+        tools:ignore="ProtectedPermissions" />
 
+    <!-- ===================================================== -->
     <!-- LOCATION -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <uses-permission
         android:name="android.permission.ACCESS_BACKGROUND_LOCATION"
-        tools:ignore="BackgroundLocation,BackgroundLocationPolicy"/>
+        tools:ignore="BackgroundLocation,BackgroundLocationPolicy" />
 
+    <!-- ===================================================== -->
     <!-- PHONE -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS"/>
-    <uses-permission android:name="android.permission.READ_CALL_LOG"
-        tools:ignore="SmsAndCallLogPolicy"/>
-    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS"
-        tools:ignore="SmsAndCallLogPolicy"/>
+    <!-- ===================================================== -->
 
+    <uses-permission
+        android:name="android.permission.READ_PHONE_STATE" />
+
+    <uses-permission
+        android:name="android.permission.READ_PHONE_NUMBERS" />
+
+    <uses-permission
+        android:name="android.permission.READ_CALL_LOG"
+        tools:ignore="SmsAndCallLogPolicy" />
+
+    <uses-permission
+        android:name="android.permission.PROCESS_OUTGOING_CALLS"
+        tools:ignore="SmsAndCallLogPolicy" />
+
+    <!-- ===================================================== -->
     <!-- SMS -->
-    <uses-permission android:name="android.permission.READ_SMS"
-        tools:ignore="SmsAndCallLogPolicy"/>
-    <uses-permission android:name="android.permission.RECEIVE_SMS"
-        tools:ignore="SmsAndCallLogPolicy"/>
-    <uses-permission android:name="android.permission.SEND_SMS"
-        tools:ignore="SmsAndCallLogPolicy"/>
+    <!-- ===================================================== -->
 
+    <uses-permission
+        android:name="android.permission.READ_SMS"
+        tools:ignore="SmsAndCallLogPolicy" />
+
+    <uses-permission
+        android:name="android.permission.RECEIVE_SMS"
+        tools:ignore="SmsAndCallLogPolicy" />
+
+    <uses-permission
+        android:name="android.permission.SEND_SMS"
+        tools:ignore="SmsAndCallLogPolicy" />
+
+    <!-- ===================================================== -->
     <!-- CONTACTS -->
-    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <!-- ===================================================== -->
 
+    <uses-permission
+        android:name="android.permission.READ_CONTACTS" />
+
+    <!-- ===================================================== -->
     <!-- CAMERA -->
-    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- ===================================================== -->
 
+    <uses-permission
+        android:name="android.permission.CAMERA" />
+
+    <!-- ===================================================== -->
     <!-- FOREGROUND SERVICES -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+    <!-- ===================================================== -->
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
         tools:ignore="ForegroundServicesPolicy" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+
+    <!-- Location foreground service -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!--
+        Temporarily retained because existing services still
+        declare dataSync.
+
+        We will remove this after migrating:
+        - MonitoringService
+        - AppSyncService
+        - ScreenTimeService
+        - ChildAppControlService
+        - SelfHealingService
+        - OverlayLockService
+    -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Media projection -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- ===================================================== -->
     <!-- FEATURES -->
     <!-- ===================================================== -->
 
-    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
-    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!-- ===================================================== -->
-    <!-- QUERIES (FIXED STRUCTURE) -->
+    <!-- QUERIES -->
     <!-- ===================================================== -->
 
     <queries>
+
         <intent>
-            <action android:name="android.intent.action.MAIN"/>
+            <action
+                android:name="android.intent.action.MAIN" />
         </intent>
+
     </queries>
 
     <!-- ===================================================== -->
     <!-- APPLICATION -->
     <!-- ===================================================== -->
-
-
 
     <application
         android:name=".ChildApp"
@@ -106,11 +191,10 @@
         android:fullBackupContent="false"
         android:theme="@style/Theme.ChildApp">
 
+        <!-- ================================================= -->
+        <!-- ANDROIDX STARTUP / WORKMANAGER -->
+        <!-- ================================================= -->
 
-
-        <!-- =======================================================-->
-        <!--provider-->
-        <!-- =========================================================-->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -121,20 +205,25 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+
         </provider>
 
-
-        <!-- ===================================================== -->
+        <!-- ================================================= -->
         <!-- ACTIVITIES -->
-        <!-- ===================================================== -->
+        <!-- ================================================= -->
 
         <activity
             android:name=".LauncherActivity"
             android:exported="true">
 
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
+
+                <action
+                    android:name="android.intent.action.MAIN" />
+
+                <category
+                    android:name="android.intent.category.LAUNCHER" />
+
             </intent-filter>
 
         </activity>
@@ -148,34 +237,50 @@
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
-        <activity android:name=".SetupWizardActivity" android:exported="false"/>
-        <activity android:name=".PairChildActivity" android:exported="false"/>
-        <activity android:name=".MainActivity" android:exported="false"/>
-        <activity android:name=".DebugResetActivity" android:exported="true"/>
+        <activity
+            android:name=".SetupWizardActivity"
+            android:exported="false" />
 
+        <activity
+            android:name=".PairChildActivity"
+            android:exported="false" />
 
-        <!-- ===================================================== -->
-        <!-- BOOT RECEIVER (FIXED) -->
-        <!-- ===================================================== -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".DebugResetActivity"
+            android:exported="true" />
+
+        <!-- ================================================= -->
+        <!-- BOOT RECEIVER -->
+        <!-- ================================================= -->
+
         <receiver
             android:name=".receiver.BootReceiver"
             android:enabled="true"
-            android:exported="true"
-            android:directBootAware="true">
+            android:exported="true">
 
             <intent-filter>
 
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+
+                <!-- TEMPORARY TEST -->
+                <action
+                    android:name="com.parentalcontrol.childapp.TEST_BOOT" />
 
             </intent-filter>
 
         </receiver>
 
-        <!-- ===================================================== -->
-        <!-- OTHER RECEIVERS -->
-        <!-- ===================================================== -->
+        <!-- ================================================= -->
+        <!-- POWER / USER STATE RECEIVER -->
+        <!-- ================================================= -->
 
         <receiver
             android:name=".receiver.PowerStateReceiver"
@@ -183,15 +288,34 @@
             android:exported="true">
 
             <intent-filter>
-                <action android:name="android.intent.action.USER_PRESENT"/>
-                <action android:name="android.intent.action.SCREEN_ON"/>
-                <action android:name="android.intent.action.ACTION_POWER_CONNECTED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+
+                <action
+                    android:name="android.intent.action.USER_PRESENT" />
+
+                <action
+                    android:name="android.intent.action.SCREEN_ON" />
+
+                <action
+                    android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+
             </intent-filter>
 
         </receiver>
 
-        <receiver android:name=".DailyResetReceiver" android:exported="false"/>
+        <!-- ================================================= -->
+        <!-- DAILY RESET -->
+        <!-- ================================================= -->
+
+        <receiver
+            android:name=".DailyResetReceiver"
+            android:exported="false" />
+
+        <!-- ================================================= -->
+        <!-- DEVICE ADMIN -->
+        <!-- ================================================= -->
 
         <receiver
             android:name=".admin.ChildAdminReceiver"
@@ -200,73 +324,121 @@
 
             <meta-data
                 android:name="android.app.device_admin"
-                android:resource="@xml/device_admin"/>
+                android:resource="@xml/device_admin" />
 
             <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+
+                <action
+                    android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+
             </intent-filter>
 
         </receiver>
 
-        <!-- SMS -->
+        <!-- ================================================= -->
+        <!-- SMS RECEIVER -->
+        <!-- ================================================= -->
+
         <receiver
             android:name=".receiver.SmsReceiver"
             android:exported="true"
             android:permission="android.permission.BROADCAST_SMS">
 
             <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+
+                <action
+                    android:name="android.provider.Telephony.SMS_RECEIVED" />
+
             </intent-filter>
 
         </receiver>
 
-        <!-- CALL -->
+        <!-- ================================================= -->
+        <!-- CALL RECEIVER -->
+        <!-- ================================================= -->
+
         <receiver
             android:name=".receiver.CallReceiver"
             android:exported="true">
 
             <intent-filter>
-                <action android:name="android.intent.action.PHONE_STATE"/>
-                <action android:name="android.intent.action.NEW_OUTGOING_CALL"/>
+
+                <action
+                    android:name="android.intent.action.PHONE_STATE" />
+
+                <action
+                    android:name="android.intent.action.NEW_OUTGOING_CALL" />
+
             </intent-filter>
 
         </receiver>
 
-        <!-- ===================================================== -->
-        <!-- SERVICES -->
-        <!-- ===================================================== -->
+        <!-- ================================================= -->
+        <!-- CONTINUOUS APP CONTROL -->
+        <!-- ================================================= -->
+
         <service
             android:name=".service.ChildAppControlService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
-            android:stopWithTask="false"/>
+            android:stopWithTask="false" />
+
+        <!-- ================================================= -->
+        <!-- LEGACY BOOT SERVICE -->
+        <!-- ================================================= -->
+        <!--
+            Kept temporarily so existing references do not break.
+
+            We will remove this after BootStartupService references
+            have been migrated to the new recovery architecture.
+        -->
 
         <service
             android:name=".service.BootStartupService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"/>
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ================================================= -->
+        <!-- MESSAGE SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".receiver.MessageService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"/>
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ================================================= -->
+        <!-- LOCATION SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.ChildLocationService"
             android:exported="false"
-            android:foregroundServiceType="location"/>
+            android:foregroundServiceType="location"
+            android:stopWithTask="false" />
+
+        <!-- ================================================= -->
+        <!-- SCREEN CAPTURE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.ScreenCaptureService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection"/>
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- ================================================= -->
+        <!-- MONITORING SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.MonitoringService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
-            android:stopWithTask="false"/>
+            android:stopWithTask="false" />
 
+        <!-- ================================================= -->
+        <!-- VPN SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".vpn.DnsVpnService"
@@ -274,9 +446,26 @@
             android:exported="true"
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync"
-            tools:ignore="VpnServicePolicy" />
+            tools:ignore="VpnServicePolicy">
 
-        <!--BrowserAccessibilityService-->
+            <!--
+                Required by Android for a VpnService.
+                This allows Android to recognize this component
+                as a VPN service.
+            -->
+            <intent-filter>
+
+                <action
+                    android:name="android.net.VpnService" />
+
+            </intent-filter>
+
+        </service>
+
+        <!-- ================================================= -->
+        <!-- ACCESSIBILITY SERVICE -->
+        <!-- ================================================= -->
+
         <service
             android:name=".accessibility.BrowserAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -286,36 +475,59 @@
             tools:ignore="AccessibilityPolicy">
 
             <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
+
+                <action
+                    android:name="android.accessibilityservice.AccessibilityService" />
+
             </intent-filter>
 
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/browser_accessibility_config" />
+
         </service>
+
+        <!-- ================================================= -->
+        <!-- SCREEN-TIME OVERLAY LOCK -->
+        <!-- ================================================= -->
 
         <service
             android:name=".OverlayLockService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"/>
+            android:foregroundServiceType="dataSync" />
 
+        <!-- ================================================= -->
+        <!-- PHONE CALL SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".receiver.CallService"
             android:exported="false"
-            android:foregroundServiceType="phoneCall"
-            tools:ignore="ForegroundServicePermission" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+
+        <!-- ================================================= -->
+        <!-- APP SYNCHRONIZATION -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.AppSyncService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"/>
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ================================================= -->
+        <!-- SCREEN TIME SERVICE -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.ScreenTimeService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ================================================= -->
+        <!-- NOTIFICATION LISTENER -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.NotificationMonitorService"
@@ -324,16 +536,27 @@
             android:exported="true">
 
             <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService"/>
+
+                <action
+                    android:name="android.service.notification.NotificationListenerService" />
+
             </intent-filter>
 
         </service>
+
+        <!-- ================================================= -->
+        <!-- SELF HEALING -->
+        <!-- ================================================= -->
 
         <service
             android:name=".service.SelfHealingService"
             android:exported="false"
             android:foregroundServiceType="dataSync"
-            android:stopWithTask="false"/>
+            android:stopWithTask="false" />
+
+        <!-- ================================================= -->
+        <!-- APP BLOCK OVERLAY -->
+        <!-- ================================================= -->
 
         <activity
             android:name=".service.AppBlockOverlayActivity"
@@ -341,7 +564,6 @@
             android:launchMode="singleTask"
             android:showOnLockScreen="true"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
-
 
     </application>
 

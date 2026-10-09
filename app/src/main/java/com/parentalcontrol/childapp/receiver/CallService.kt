@@ -5,13 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
-import android.telephony.TelephonyManager
 import android.util.Log
-import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
@@ -29,21 +28,33 @@ class CallService : Service() {
 
         private const val NOTIF_ID = 102
 
-        /**
-         * Subscription ID supplied by CallReceiver.
-         */
         const val EXTRA_SUBSCRIPTION_ID =
             "subscriptionId"
+
+        const val EXTRA_SIM_SLOT =
+            "simSlot"
+
+        const val EXTRA_CARRIER_NAME =
+            "carrierName"
+
+        const val EXTRA_SIM_CARRIER =
+            "simCarrier"
+
+        const val EXTRA_SIM_DISPLAY_NAME =
+            "simDisplayName"
+
+        const val EXTRA_SIM_COUNTRY =
+            "simCountry"
     }
 
     private lateinit var database: FirebaseDatabase
-
 
     // ============================================================
     // CREATE
     // ============================================================
 
     override fun onCreate() {
+
         super.onCreate()
 
         database =
@@ -57,12 +68,10 @@ class CallService : Service() {
         startForegroundSafely()
     }
 
-
     // ============================================================
     // START
     // ============================================================
 
-    @RequiresPermission(Manifest.permission.READ_PHONE_STATE)
     override fun onStartCommand(
         intent: Intent?,
         flags: Int,
@@ -73,20 +82,23 @@ class CallService : Service() {
 
             Log.w(
                 TAG,
-                "⚠️ CallService started with null intent"
+                "⚠️ CallService started with NULL intent"
             )
+
+            stopSelfResult(startId)
 
             return START_NOT_STICKY
         }
 
         try {
 
-            // ====================================================
+            // =====================================================
             // BASIC CALL INFORMATION
-            // ====================================================
+            // =====================================================
 
             val childId =
-                intent.getStringExtra("childId")
+                intent
+                    .getStringExtra("childId")
                     ?.trim()
                     ?.takeIf {
                         it.isNotBlank()
@@ -98,25 +110,38 @@ class CallService : Service() {
                             "❌ Missing childId"
                         )
 
+                        stopSelfResult(startId)
+
                         return START_NOT_STICKY
                     }
 
-
             val number =
-                intent.getStringExtra("number")
+                intent
+                    .getStringExtra("number")
                     ?.trim()
                     ?.takeIf {
                         it.isNotBlank()
                     }
                     ?: "UNKNOWN"
 
+            val contactName =
+                intent
+                    .getStringExtra("contactName")
+                    ?.trim()
+                    ?: ""
+
+            val contactSaved =
+                intent.getBooleanExtra(
+                    "contactSaved",
+                    false
+                )
 
             val direction =
-                intent.getStringExtra("direction")
+                intent
+                    .getStringExtra("direction")
                     ?.trim()
                     ?.uppercase()
                     ?: "INCOMING"
-
 
             val timestamp =
                 intent.getLongExtra(
@@ -124,13 +149,11 @@ class CallService : Service() {
                     System.currentTimeMillis()
                 )
 
-
             val duration =
                 intent.getLongExtra(
                     "duration",
                     0L
                 )
-
 
             val finalDuration =
                 if (
@@ -141,33 +164,9 @@ class CallService : Service() {
                     duration.coerceAtLeast(0L)
                 }
 
-
-            // ====================================================
-            // TELEPHONY
-            // ====================================================
-
-            val telephonyManager =
-                getSystemService(
-                    TELEPHONY_SERVICE
-                ) as TelephonyManager
-
-
-            val subscriptionManager =
-                getSystemService(
-                    SubscriptionManager::class.java
-                )
-
-
-            // ====================================================
-            // SUBSCRIPTION ID
-            //
-            // IMPORTANT:
-            //
-            // We MUST prefer the subscription ID supplied by
-            // CallReceiver.
-            //
-            // Do NOT immediately use the default voice SIM.
-            // ====================================================
+            // =====================================================
+            // RECEIVER SIM DATA
+            // =====================================================
 
             val suppliedSubscriptionId =
                 intent.getIntExtra(
@@ -175,98 +174,133 @@ class CallService : Service() {
                     SubscriptionManager.INVALID_SUBSCRIPTION_ID
                 )
 
+            val suppliedSimSlot =
+                intent.getIntExtra(
+                    EXTRA_SIM_SLOT,
+                    -1
+                )
 
-            val defaultVoiceSubscriptionId =
-                SubscriptionManager
-                    .getDefaultVoiceSubscriptionId()
-
-
-            val subscriptionId =
-                when {
-
-                    SubscriptionManager.isValidSubscriptionId(
-                        suppliedSubscriptionId
-                    ) -> {
-
-                        Log.d(
-                            TAG,
-                            "📱 Using subscriptionId supplied by receiver = " +
-                                    suppliedSubscriptionId
-                        )
-
-                        suppliedSubscriptionId
+            val suppliedCarrierName =
+                intent
+                    .getStringExtra(
+                        EXTRA_CARRIER_NAME
+                    )
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotBlank()
                     }
+                    ?: ""
 
-
-                    SubscriptionManager.isValidSubscriptionId(
-                        defaultVoiceSubscriptionId
-                    ) -> {
-
-                        Log.w(
-                            TAG,
-                            "⚠️ Receiver did not provide valid subscriptionId."
-                        )
-
-                        Log.w(
-                            TAG,
-                            "⚠️ Falling back to default voice subscription = " +
-                                    defaultVoiceSubscriptionId
-                        )
-
-                        defaultVoiceSubscriptionId
+            val suppliedSimCarrier =
+                intent
+                    .getStringExtra(
+                        EXTRA_SIM_CARRIER
+                    )
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotBlank()
                     }
+                    ?: suppliedCarrierName
 
-
-                    else -> {
-
-                        Log.w(
-                            TAG,
-                            "⚠️ No valid subscription ID available"
-                        )
-
-                        SubscriptionManager.INVALID_SUBSCRIPTION_ID
+            val suppliedDisplayName =
+                intent
+                    .getStringExtra(
+                        EXTRA_SIM_DISPLAY_NAME
+                    )
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotBlank()
                     }
-                }
+                    ?: suppliedSimCarrier
 
+            val suppliedSimCountry =
+                intent
+                    .getStringExtra(
+                        EXTRA_SIM_COUNTRY
+                    )
+                    ?.trim()
+                    ?.uppercase()
+                    ?.takeIf {
+                        it.isNotBlank()
+                    }
+                    ?: ""
 
-            // ====================================================
-            // FIND SIM INFORMATION
-            // ====================================================
+            Log.d(
+                TAG,
+                """
+                📦 RECEIVER → CALL SERVICE
+                =====================================
+                subscriptionId = $suppliedSubscriptionId
+                simSlot        = $suppliedSimSlot
+                carrierName    = $suppliedCarrierName
+                simCarrier     = $suppliedSimCarrier
+                displayName    = $suppliedDisplayName
+                country        = $suppliedSimCountry
+                =====================================
+                """.trimIndent()
+            )
 
-            val simInfo: SubscriptionInfo? =
+            // =====================================================
+            // OPTIONAL ANDROID ENRICHMENT
+            //
+            // IMPORTANT:
+            //
+            // We ONLY query the exact subscription ID supplied
+            // by CallReceiver.
+            //
+            // We NEVER choose:
+            //
+            // - default voice SIM
+            // - default data SIM
+            // - first SIM
+            // - another active SIM
+            //
+            // If the receiver supplied -1, the service preserves
+            // the receiver values.
+            // =====================================================
 
+            val subscriptionInfo =
+                getSubscriptionInfo(
+                    suppliedSubscriptionId
+                )
+
+            // =====================================================
+            // FINAL SUBSCRIPTION ID
+            // =====================================================
+
+            val finalSubscriptionId =
                 if (
+                    subscriptionInfo != null &&
                     SubscriptionManager.isValidSubscriptionId(
-                        subscriptionId
+                        subscriptionInfo.subscriptionId
                     )
                 ) {
 
-                    subscriptionManager
-                        .getActiveSubscriptionInfo(
-                            subscriptionId
-                        )
+                    subscriptionInfo.subscriptionId
 
                 } else {
 
-                    null
+                    suppliedSubscriptionId
                 }
 
+            // =====================================================
+            // FINAL SLOT
+            // =====================================================
 
-            // ====================================================
-            // SIM SLOT
-            // ====================================================
+            val finalSimSlot =
+                subscriptionInfo
+                    ?.simSlotIndex
+                    ?.takeIf {
+                        it >= 0
+                    }
+                    ?: suppliedSimSlot
 
-            val simSlot =
-                simInfo?.simSlotIndex
-                    ?: -1
+            // =====================================================
+            // ANDROID CARRIER
+            // =====================================================
 
-
-            // ====================================================
-            // RAW SIM CARRIER NAME
-            // ====================================================
-
-            val rawCarrierName =
-                simInfo
+            val androidCarrierName =
+                subscriptionInfo
                     ?.carrierName
                     ?.toString()
                     ?.trim()
@@ -275,166 +309,164 @@ class CallService : Service() {
                     }
                     ?: ""
 
+            // =====================================================
+            // FINAL CARRIER
+            //
+            // Android information is used only for the same
+            // subscription supplied by the receiver.
+            // =====================================================
 
-            // ====================================================
-            // SUBSCRIPTION-SPECIFIC TELEPHONY MANAGER
-            // ====================================================
-
-            val subscriptionTelephonyManager =
-
-                if (
-                    SubscriptionManager.isValidSubscriptionId(
-                        subscriptionId
-                    )
-                ) {
-
-                    if (
-                        Build.VERSION.SDK_INT >=
-                        Build.VERSION_CODES.N
-                    ) {
-
-                        telephonyManager
-                            .createForSubscriptionId(
-                                subscriptionId
-                            )
-
-                    } else {
-
-                        telephonyManager
+            val finalCarrier =
+                androidCarrierName
+                    .ifBlank {
+                        suppliedCarrierName
+                    }
+                    .ifBlank {
+                        suppliedSimCarrier
+                    }
+                    .ifBlank {
+                        "Unknown"
                     }
 
-                } else {
+            val finalSimCarrier =
+                androidCarrierName
+                    .ifBlank {
+                        suppliedSimCarrier
+                    }
+                    .ifBlank {
+                        suppliedCarrierName
+                    }
+                    .ifBlank {
+                        "Unknown"
+                    }
 
-                    telephonyManager
-                }
+            // =====================================================
+            // DISPLAY NAME
+            // =====================================================
 
-
-            // ====================================================
-            // SIM OPERATOR
-            //
-            // This is the important value for identifying
-            // the actual SIM carrier.
-            //
-            // Kenya examples:
-            //
-            // 63902 -> Safaricom
-            // 63903 -> Airtel
-            // 63904 -> Faiba
-            // 63905 -> Equitel
-            // 63907 -> Telkom
-            // ====================================================
-
-            val simOperator =
-                subscriptionTelephonyManager
-                    .simOperator
-                    ?.trim()
-                    ?.replace(
-                        " ",
-                        ""
-                    )
-                    ?: ""
-
-
-            // ====================================================
-            // NETWORK OPERATOR
-            //
-            // NOTE:
-            //
-            // This is NOT used as the primary SIM carrier.
-            //
-            // It can represent the currently registered network
-            // and can therefore be misleading.
-            // ====================================================
-
-            val networkOperatorName =
-                subscriptionTelephonyManager
-                    .networkOperatorName
+            val androidDisplayName =
+                subscriptionInfo
+                    ?.displayName
+                    ?.toString()
                     ?.trim()
                     ?.takeIf {
                         it.isNotBlank()
                     }
                     ?: ""
 
+            val finalDisplayName =
+                androidDisplayName
+                    .ifBlank {
+                        suppliedDisplayName
+                    }
+                    .ifBlank {
+                        finalCarrier
+                    }
 
-            // ====================================================
+            // =====================================================
             // COUNTRY
-            // ====================================================
+            // =====================================================
 
-            val country =
-                simInfo
+            val androidCountry =
+                subscriptionInfo
                     ?.countryIso
                     ?.trim()
+                    ?.uppercase()
                     ?.takeIf {
                         it.isNotBlank()
                     }
-                    ?.uppercase()
-                    ?: subscriptionTelephonyManager
-                        .simCountryIso
-                        ?.trim()
-                        ?.takeIf {
-                            it.isNotBlank()
-                        }
-                        ?.uppercase()
-                    ?: "Unknown"
+                    ?: ""
 
+            val country =
+                androidCountry
+                    .ifBlank {
+                        suppliedSimCountry
+                    }
+                    .ifBlank {
+                        "Unknown"
+                    }
 
-            // ====================================================
-            // RESOLVE ACTUAL SIM CARRIER
-            // ====================================================
-
-            val resolvedCarrier =
-                resolveCarrier(
-                    simOperator = simOperator,
-                    rawCarrierName = rawCarrierName
-                )
-
-
-            // ====================================================
-            // DEBUG
-            // ====================================================
+            // =====================================================
+            // FINAL DIAGNOSTIC
+            // =====================================================
 
             Log.d(
                 TAG,
                 """
-                
-                📞 CALL INFORMATION
-                =====================================
-                
+                📞 FINAL CALL INFORMATION
+                ==========================================
+
                 childId             = $childId
-                
+
                 direction           = $direction
                 number              = $number
                 duration            = $finalDuration
                 timestamp           = $timestamp
-                
-                -------------------------------------
-                
-                suppliedSubId       = $suppliedSubscriptionId
-                defaultVoiceSubId   = $defaultVoiceSubscriptionId
-                selectedSubId       = $subscriptionId
-                
-                simSlot             = $simSlot
-                
-                -------------------------------------
-                
-                simOperator         = $simOperator
-                rawCarrierName      = $rawCarrierName
-                networkOperator     = $networkOperatorName
-                
-                -------------------------------------
-                
-                RESOLVED CARRIER    = $resolvedCarrier
+
+                ------------------------------------------
+
+                RECEIVER RESOLUTION
+                subscriptionId      = $suppliedSubscriptionId
+                simSlot             = $suppliedSimSlot
+                carrier             = $suppliedCarrierName
+                simCarrier          = $suppliedSimCarrier
+                displayName         = $suppliedDisplayName
+                country             = $suppliedSimCountry
+
+                ------------------------------------------
+
+                ANDROID ENRICHMENT
+                subscriptionId      = ${
+                    subscriptionInfo?.subscriptionId
+                        ?: "Unavailable"
+                }
+
+                simSlot             = ${
+                    subscriptionInfo?.simSlotIndex
+                        ?: "Unavailable"
+                }
+
+                carrierName         = ${
+                    androidCarrierName.ifBlank {
+                        "Unavailable"
+                    }
+                }
+
+                displayName         = ${
+                    androidDisplayName.ifBlank {
+                        "Unavailable"
+                    }
+                }
+
+                countryIso          = ${
+                    androidCountry.ifBlank {
+                        "Unavailable"
+                    }
+                }
+
+                ------------------------------------------
+
+                FINAL FIREBASE VALUES
+
+                provider            = $finalCarrier
+                simCarrier          = $finalSimCarrier
+                simSlot             = $finalSimSlot
+                subscriptionId      = $finalSubscriptionId
                 country             = $country
-                
-                =====================================
-                
+                displayName         = $finalDisplayName
+
+                ------------------------------------------
+
+                contactName         = $contactName
+                contactSaved        = $contactSaved
+
+                ==========================================
                 """.trimIndent()
             )
 
-
-            // ====================================================
+            // =====================================================
             // CREATE FIREBASE RECORD
-            // ====================================================
+            // =====================================================
 
             val callRecord =
                 CallRecord(
@@ -445,6 +477,12 @@ class CallService : Service() {
                     direction =
                         direction,
 
+                    contactName =
+                        contactName,
+
+                    contactSaved =
+                        contactSaved,
+
                     timestamp =
                         timestamp,
 
@@ -452,61 +490,65 @@ class CallService : Service() {
                         finalDuration,
 
                     provider =
-                        resolvedCarrier,
+                        finalCarrier,
 
                     country =
                         country,
 
                     simSlot =
-                        simSlot,
+                        finalSimSlot,
 
                     simCarrier =
-                        resolvedCarrier,
+                        finalSimCarrier,
 
                     subscriptionId =
-                        subscriptionId
+                        finalSubscriptionId
                 )
 
+            // =====================================================
+            // SAVE FIREBASE
+            // =====================================================
 
-            // ====================================================
-            // SAVE TO FIREBASE
-            // ====================================================
-
-            callsRef(childId)
+            callsRef(
+                childId
+            )
                 .push()
-                .setValue(callRecord)
+                .setValue(
+                    callRecord
+                )
                 .addOnSuccessListener {
 
                     Log.d(
                         TAG,
                         """
-                        
-                        ✅ CALL SAVED
+                        ✅✅✅ CALL SAVED TO FIREBASE ✅✅✅
                         =====================================
-                        
+
                         path =
                         phone_calls/$childId
-                        
+
                         number =
                         $number
-                        
+
                         direction =
                         $direction
-                        
-                        carrier =
-                        $resolvedCarrier
-                        
-                        simOperator =
-                        $simOperator
-                        
-                        slot =
-                        $simSlot
-                        
+
+                        provider =
+                        $finalCarrier
+
+                        simCarrier =
+                        $finalSimCarrier
+
+                        simSlot =
+                        $finalSimSlot
+
                         subscriptionId =
-                        $subscriptionId
-                        
+                        $finalSubscriptionId
+
+                        country =
+                        $country
+
                         =====================================
-                        
                         """.trimIndent()
                     )
                 }
@@ -519,12 +561,11 @@ class CallService : Service() {
                     )
                 }
 
-
         } catch (e: SecurityException) {
 
             Log.e(
                 TAG,
-                "❌ Missing phone/subscription permission",
+                "❌ Phone/subscription permission error",
                 e
             )
 
@@ -537,108 +578,102 @@ class CallService : Service() {
             )
         }
 
-
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
-
     // ============================================================
-    // CARRIER RESOLVER
+    // GET SUBSCRIPTION INFORMATION
     // ============================================================
 
-    private fun resolveCarrier(
-        simOperator: String,
-        rawCarrierName: String
-    ): String {
-
-        val operator =
-            simOperator
-                .trim()
-                .replace(
-                    " ",
-                    ""
-                )
-
-
-        // ========================================================
-        // KENYA MCC/MNC
-        // ========================================================
-
-        when {
-
-            // ----------------------------------------------------
-            // SAFARICOM
-            // ----------------------------------------------------
-
-            operator == "63902" ||
-                    operator.startsWith("63902") -> {
-
-                return "Safaricom"
-            }
-
-
-            // ----------------------------------------------------
-            // AIRTEL KENYA
-            // ----------------------------------------------------
-
-            operator == "63903" ||
-                    operator.startsWith("63903") -> {
-
-                return "Airtel"
-            }
-
-
-            // ----------------------------------------------------
-            // FAIBA / JAMII
-            // ----------------------------------------------------
-
-            operator == "63904" ||
-                    operator.startsWith("63904") -> {
-
-                return "Faiba"
-            }
-
-
-            // ----------------------------------------------------
-            // EQUITEL
-            // ----------------------------------------------------
-
-            operator == "63905" ||
-                    operator.startsWith("63905") -> {
-
-                return "Equitel"
-            }
-
-
-            // ----------------------------------------------------
-            // TELKOM KENYA
-            // ----------------------------------------------------
-
-            operator == "63907" ||
-                    operator.startsWith("63907") -> {
-
-                return "Telkom"
-            }
-        }
-
-
-        // ========================================================
-        // UNKNOWN MCC/MNC
-        //
-        // Only now fall back to carrierName.
-        // ========================================================
+    private fun getSubscriptionInfo(
+        subscriptionId: Int
+    ): SubscriptionInfo? {
 
         if (
-            rawCarrierName.isNotBlank()
+            !SubscriptionManager.isValidSubscriptionId(
+                subscriptionId
+            )
         ) {
 
-            return rawCarrierName
+            Log.d(
+                TAG,
+                "ℹ️ No valid subscription ID supplied by receiver"
+            )
+
+            return null
         }
 
+        return try {
 
-        return "Unknown"
+            val subscriptionManager =
+                getSystemService(
+                    SubscriptionManager::class.java
+                )
+
+            val info =
+                subscriptionManager
+                    ?.getActiveSubscriptionInfo(
+                        subscriptionId
+                    )
+
+            if (
+                info == null
+            ) {
+
+                Log.w(
+                    TAG,
+                    """
+                    ⚠️ SubscriptionInfo unavailable
+
+                    subscriptionId=$subscriptionId
+
+                    The service will preserve the values
+                    supplied by CallReceiver.
+
+                    No other SIM will be selected.
+                    """.trimIndent()
+                )
+
+            } else {
+
+                Log.d(
+                    TAG,
+                    """
+                    🟢 ANDROID SUBSCRIPTION FOUND
+                    --------------------------------
+                    subscriptionId=${info.subscriptionId}
+                    simSlot=${info.simSlotIndex}
+                    carrierName=${info.carrierName}
+                    displayName=${info.displayName}
+                    countryIso=${info.countryIso}
+                    --------------------------------
+                    """.trimIndent()
+                )
+            }
+
+            info
+
+        } catch (e: SecurityException) {
+
+            Log.e(
+                TAG,
+                "❌ Cannot read SubscriptionInfo",
+                e
+            )
+
+            null
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ SubscriptionInfo error",
+                e
+            )
+
+            null
+        }
     }
-
 
     // ============================================================
     // FIREBASE REFERENCE
@@ -656,7 +691,6 @@ class CallService : Service() {
                 childId
             )
     }
-
 
     // ============================================================
     // FOREGROUND SERVICE
@@ -678,15 +712,17 @@ class CallService : Service() {
                         NotificationManager.IMPORTANCE_LOW
                     )
 
-                channel.setShowBadge(false)
+                channel.setShowBadge(
+                    false
+                )
 
                 getSystemService(
                     NotificationManager::class.java
-                )?.createNotificationChannel(
-                    channel
                 )
+                    ?.createNotificationChannel(
+                        channel
+                    )
             }
-
 
             val notification =
                 NotificationCompat
@@ -698,20 +734,53 @@ class CallService : Service() {
                         "Parental Control Active"
                     )
                     .setContentText(
-                        "Monitoring phone calls"
+                        "Saving call information"
                     )
                     .setSmallIcon(
                         R.mipmap.ic_launcher
                     )
-                    .setOngoing(true)
+                    .setOngoing(
+                        true
+                    )
+                    .setCategory(
+                        NotificationCompat.CATEGORY_SERVICE
+                    )
                     .build()
 
+            if (
+                Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.Q
+            ) {
 
-            startForeground(
-                NOTIF_ID,
-                notification
+                startForeground(
+                    NOTIF_ID,
+                    notification,
+                    android.content.pm.ServiceInfo
+                        .FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+
+            } else {
+
+                startForeground(
+                    NOTIF_ID,
+                    notification
+                )
+            }
+
+            Log.d(
+                TAG,
+                "✅ CallService foreground started"
             )
 
+        } catch (e: SecurityException) {
+
+            Log.e(
+                TAG,
+                "❌ Foreground security error",
+                e
+            )
+
+            stopSelf()
 
         } catch (e: Exception) {
 
@@ -725,12 +794,14 @@ class CallService : Service() {
         }
     }
 
-
     // ============================================================
     // BIND
     // ============================================================
 
     override fun onBind(
         intent: Intent?
-    ): IBinder? = null
+    ): IBinder? {
+
+        return null
+    }
 }

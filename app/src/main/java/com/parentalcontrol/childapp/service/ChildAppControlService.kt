@@ -1,407 +1,1068 @@
 package com.parentalcontrol.childapp.service
 
-import android.app.*
+import android.app.AppOpsManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
-import com.google.firebase.database.*
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import com.parentalcontrol.childapp.model.AppRule
-import android.app.AppOpsManager
-import android.os.Process
 import java.util.Calendar
 
 class ChildAppControlService : Service() {
 
-    // dynamic app rules from parent
-    private val monitoredApps = mutableMapOf<String, AppRule>()
+    companion object {
+        private const val TAG = "CHILD_SERVICE"
+
+        private const val PREFS_NAME = "child_prefs"
+        private const val CHILD_ID_KEY = "child_id"
+
+        private const val CHANNEL_ID = "child_control_channel"
+        private const val NOTIFICATION_ID = 1
+
+        private const val ENFORCEMENT_INTERVAL = 15_000L
+
+        fun start(context: Context) {
+
+            try {
+
+                val intent =
+                    Intent(
+                        context,
+                        ChildAppControlService::class.java
+                    )
+
+                if (android.os.Build.VERSION.SDK_INT >=
+                    android.os.Build.VERSION_CODES.O
+                ) {
+
+                    context.startForegroundService(intent)
+
+                } else {
+
+                    context.startService(intent)
+                }
+
+                Log.e(
+                    TAG,
+                    "✅ ChildAppControlService start requested"
+                )
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "❌ Failed to start ChildAppControlService",
+                    e
+                )
+            }
+        }
+    }
+
+    // ============================================================
+    // APP RULES
+    // ============================================================
+
+    private val monitoredApps =
+        mutableMapOf<String, AppRule>()
+
     private var blockSchedule: BlockSchedule? = null
+
+    // ============================================================
+    // FIREBASE
+    // ============================================================
 
     private lateinit var db: DatabaseReference
     private lateinit var childId: String
-    private val handler = Handler(Looper.getMainLooper())
 
     private var rulesListener: ValueEventListener? = null
     private var scheduleListener: ValueEventListener? = null
 
+    // ============================================================
+    // HANDLER
+    // ============================================================
+
+    private val handler =
+        Handler(Looper.getMainLooper())
+
+    // ============================================================
+    // SERVICE CREATE
+    // ============================================================
+
     override fun onCreate() {
-        Log.e("CHILD_SERVICE", "SERVICE STARTED")
+
         super.onCreate()
 
-        db = FirebaseDatabase.getInstance().reference
-        val prefs = getSharedPreferences("child_prefs", Context.MODE_PRIVATE)
-        childId = prefs.getString("child_id", "child123") ?: "child123"
+        Log.e(
+            TAG,
+            "=================================================="
+        )
 
-        startForegroundService()
-        listenToParentRules()     // listen for per-app rules
-        listenToBlockSchedule()   // listen for schedules
+        Log.e(
+            TAG,
+            "🔥 CHILD APP CONTROL SERVICE CREATED"
+        )
+
+        Log.e(
+            TAG,
+            "=================================================="
+        )
+
+        // --------------------------------------------------------
+        // Foreground notification FIRST
+        // --------------------------------------------------------
+
+        try {
+
+            startForegroundService()
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ Failed to enter foreground",
+                e
+            )
+
+            stopSelf()
+
+            return
+        }
+
+        // --------------------------------------------------------
+        // Firebase
+        // --------------------------------------------------------
+
+        db =
+            FirebaseDatabase
+                .getInstance()
+                .reference
+
+        // --------------------------------------------------------
+        // Load child ID
+        // --------------------------------------------------------
+
+        val prefs =
+            getSharedPreferences(
+                PREFS_NAME,
+                Context.MODE_PRIVATE
+            )
+
+        val storedChildId =
+            prefs.getString(
+                CHILD_ID_KEY,
+                null
+            )
+                ?.trim()
+
+        if (storedChildId.isNullOrBlank()) {
+
+            Log.e(
+                TAG,
+                "❌ child_id is missing"
+            )
+
+            Log.e(
+                TAG,
+                "❌ Refusing to use a fake/default child ID"
+            )
+
+            stopSelf()
+
+            return
+        }
+
+        childId = storedChildId
+
+        Log.e(
+            TAG,
+            "✅ childId loaded = [$childId]"
+        )
+
+        // --------------------------------------------------------
+        // Firebase listeners
+        // --------------------------------------------------------
+
+        listenToParentRules()
+
+        listenToBlockSchedule()
+
+        // --------------------------------------------------------
+        // Usage enforcement
+        // --------------------------------------------------------
+
         startUsageTracking()
-    }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.e("CHILD_SERVICE", "onStartCommand triggered")
+        Log.e(
+            TAG,
+            "✅ ChildAppControlService initialization complete"
+        )
+    }
+    // ============================================================
+    // SERVICE START
+    // ============================================================
+
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
+
+        Log.e(
+            TAG,
+            "=================================================="
+        )
+
+        Log.e(
+            TAG,
+            "🚀 ChildAppControlService onStartCommand"
+        )
+
+        Log.e(
+            TAG,
+            "🚀 startId=$startId"
+        )
+
+        Log.e(
+            TAG,
+            "🚀 childId=$childId"
+        )
+
+        Log.e(
+            TAG,
+            "🚀 flags=$flags"
+        )
+
+        Log.e(
+            TAG,
+            "=================================================="
+        )
+
+        /*
+         * START_STICKY tells Android that this service represents
+         * ongoing protection work and should be recreated after the
+         * process/service is killed when the OS permits it.
+         *
+         * Reboot recovery itself is handled separately by the boot
+         * recovery architecture.
+         */
 
         return START_STICKY
     }
 
+    // ============================================================
+    // SERVICE DESTROY
+    // ============================================================
+
     override fun onDestroy() {
 
-        // -----------------------------------
-        // REMOVE FIREBASE LISTENER (IMPORTANT)
-        // -----------------------------------
-        rulesListener?.let {
-            db.child("app_rules")
-                .child(childId)
-                .removeEventListener(it)
+        Log.e(
+            TAG,
+            "💀 ChildAppControlService destroying"
+        )
+
+        // --------------------------------------------------------
+        // Remove app rules listener
+        // --------------------------------------------------------
+
+        try {
+
+            rulesListener?.let { listener ->
+
+                db.child("app_rules")
+                    .child(childId)
+                    .removeEventListener(listener)
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ Failed removing rules listener",
+                e
+            )
         }
 
-        // OPTIONAL: if you also added schedule listener
-        scheduleListener?.let {
-            db.child("app_rules")
-                .child(childId)
-                .child("block_schedule")
-                .removeEventListener(it)
+        rulesListener = null
+
+        // --------------------------------------------------------
+        // Remove block schedule listener
+        // --------------------------------------------------------
+
+        try {
+
+            scheduleListener?.let { listener ->
+
+                db.child("app_rules")
+                    .child(childId)
+                    .child("block_schedule")
+                    .removeEventListener(listener)
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ Failed removing schedule listener",
+                e
+            )
         }
 
-        // -----------------------------------
-        // STOP HANDLER LOOP (VERY IMPORTANT)
-        // -----------------------------------
-        handler.removeCallbacksAndMessages(null)
+        scheduleListener = null
 
-        Log.e("ChildService", "Service destroyed and listeners removed")
+        // --------------------------------------------------------
+        // Stop enforcement loop
+        // --------------------------------------------------------
+
+        handler.removeCallbacks(
+            enforcementRunnable
+        )
+
+        monitoredApps.clear()
+        blockSchedule = null
+
+        Log.e(
+            TAG,
+            "✅ Child service destroyed and listeners removed"
+        )
 
         super.onDestroy()
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        val restartIntent = Intent(applicationContext, ChildAppControlService::class.java)
-        restartIntent.setPackage(packageName)
-        startService(restartIntent)
+    // ============================================================
+    // TASK REMOVED
+    // ============================================================
+
+    override fun onTaskRemoved(
+        rootIntent: Intent?
+    ) {
+
+        Log.e(
+            TAG,
+            "⚠️ App task removed."
+        )
+
+        Log.e(
+            TAG,
+            "⚠️ Foreground ChildAppControlService remains managed by Android."
+        )
+
+        /*
+         * Do NOT call startService() here.
+         *
+         * Modern Android versions restrict background service starts,
+         * and BootReceiver/SystemBootOrchestrator is responsible for
+         * reboot recovery.
+         */
 
         super.onTaskRemoved(rootIntent)
     }
 
-    // -----------------------------
-    // 1️⃣ Foreground service
-    // -----------------------------
+    // ============================================================
+    // FOREGROUND SERVICE
+    // ============================================================
+
     private fun startForegroundService() {
-        val channelId = "child_control_channel"
-        val channel = NotificationChannel(
-            channelId,
-            "Child Control Service",
-            NotificationManager.IMPORTANCE_LOW
+
+        val manager =
+            getSystemService(
+                NotificationManager::class.java
+            )
+
+        val channel =
+            NotificationChannel(
+                CHANNEL_ID,
+                "Child Control Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+
+        channel.description =
+            "Child app usage and parental control enforcement"
+
+        manager.createNotificationChannel(channel)
+
+        val notification =
+            Notification.Builder(
+                this,
+                CHANNEL_ID
+            )
+                .setContentTitle(
+                    "Parental Control Active"
+                )
+                .setContentText(
+                    "Monitoring app usage and limits"
+                )
+                .setSmallIcon(
+                    android.R.drawable.ic_lock_lock
+                )
+                .setOngoing(true)
+                .setCategory(
+                    Notification.CATEGORY_SERVICE
+                )
+                .build()
+
+        startForeground(
+            NOTIFICATION_ID,
+            notification
         )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
 
-        val notification = Notification.Builder(this, channelId)
-            .setContentTitle("Parental Control Active")
-            .setContentText("Monitoring app usage and notifications")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .build()
-
-        startForeground(1, notification)
+        Log.e(
+            TAG,
+            "✅ Foreground notification started"
+        )
     }
 
-    // -----------------------------
-    // 2️⃣ Listen to parent app rules
-    // -----------------------------
+    // ============================================================
+    // FIREBASE APP RULES
+    // ============================================================
 
     private fun listenToParentRules() {
 
-        val ref = db.child("app_rules").child(childId)
+        val ref =
+            db.child("app_rules")
+                .child(childId)
 
-        // IMPORTANT: remove old listener first (prevents duplicates)
-        rulesListener?.let {
-            ref.removeEventListener(it)
+        // --------------------------------------------------------
+        // Remove previous listener
+        // --------------------------------------------------------
+
+        rulesListener?.let { listener ->
+            ref.removeEventListener(listener)
         }
 
-        rulesListener = object : ValueEventListener {
+        // --------------------------------------------------------
+        // Create listener
+        // --------------------------------------------------------
 
-            override fun onDataChange(snapshot: DataSnapshot) {
+        rulesListener =
+            object : ValueEventListener {
 
-                monitoredApps.clear()
+                override fun onDataChange(
+                    snapshot: DataSnapshot
+                ) {
 
-                if (!snapshot.exists()) {
-                    Log.d("RULES_DEBUG", "No app rules found for childId=$childId")
-                    return
-                }
+                    monitoredApps.clear()
 
-                for (appSnap in snapshot.children) {
+                    if (!snapshot.exists()) {
 
-                    val rule = appSnap.getValue(AppRule::class.java)
+                        Log.d(
+                            "RULES_DEBUG",
+                            "No app rules found for childId=$childId"
+                        )
 
-                    val rawKey = appSnap.key
-
-                    if (rule == null || rawKey.isNullOrBlank()) {
-                        continue
+                        return
                     }
 
-                    val packageName = rawKey.replace("_", ".")
+                    for (
+                    appSnap in snapshot.children
+                    ) {
 
-                    monitoredApps[packageName] = rule
+                        val rawKey =
+                            appSnap.key
+
+                        if (
+                            rawKey.isNullOrBlank()
+                        ) {
+                            continue
+                        }
+
+                        /*
+                         * Ignore the block_schedule node.
+                         *
+                         * It lives underneath app_rules but is not
+                         * an AppRule.
+                         */
+                        if (
+                            rawKey == "block_schedule"
+                        ) {
+                            continue
+                        }
+
+                        val rule =
+                            try {
+
+                                appSnap.getValue(
+                                    AppRule::class.java
+                                )
+
+                            } catch (e: Exception) {
+
+                                Log.e(
+                                    "RULES_DEBUG",
+                                    "Failed parsing rule: $rawKey",
+                                    e
+                                )
+
+                                null
+                            }
+
+                        if (rule == null) {
+                            continue
+                        }
+
+                        /*
+                         * Parent app stores package names with dots
+                         * converted to underscores.
+                         *
+                         * Example:
+                         *
+                         * com.android.chrome
+                         *        ↓
+                         * com_android_chrome
+                         */
+
+                        val packageName =
+                            rawKey.replace(
+                                "_",
+                                "."
+                            )
+
+                        monitoredApps[
+                            packageName
+                        ] = rule
+
+                        Log.d(
+                            "RULES_DEBUG",
+                            "Loaded rule -> " +
+                                    "$packageName | " +
+                                    "blocked=${rule.blocked} | " +
+                                    "limit=${rule.daily_limit}"
+                        )
+                    }
 
                     Log.d(
-                        "RULES_DEBUG",
-                        "Loaded rule -> $packageName | blocked=${rule.blocked} | limit=${rule.daily_limit}"
+                        TAG,
+                        "Rules updated successfully. " +
+                                "Total apps=${monitoredApps.size}"
                     )
                 }
 
-                Log.d(
-                    "ChildService",
-                    "Rules updated successfully. Total apps=${monitoredApps.size}"
-                )
+                override fun onCancelled(
+                    error: DatabaseError
+                ) {
+
+                    Log.e(
+                        "RULES_DEBUG",
+                        "Firebase cancelled: ${error.message}"
+                    )
+                }
             }
 
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("RULES_DEBUG", "Firebase cancelled: ${error.message}")
-            }
-        }
+        // --------------------------------------------------------
+        // Attach listener
+        // --------------------------------------------------------
 
-        ref.addValueEventListener(rulesListener!!)
+        ref.addValueEventListener(
+            rulesListener!!
+        )
+
+        Log.d(
+            TAG,
+            "✅ App rules listener attached"
+        )
     }
 
-    // -----------------------------
-    // 3️⃣ Listen to optional block schedule
-    // -----------------------------
+    // ============================================================
+    // BLOCK SCHEDULE
+    // ============================================================
+
     private fun listenToBlockSchedule() {
 
-        db.child("app_rules")
-            .child(childId)
-            .child("block_schedule")
-            .addValueEventListener(object : ValueEventListener {
+        val ref =
+            db.child("app_rules")
+                .child(childId)
+                .child("block_schedule")
 
-                override fun onDataChange(snapshot: DataSnapshot) {
+        // --------------------------------------------------------
+        // Remove previous listener
+        // --------------------------------------------------------
+
+        scheduleListener?.let { listener ->
+            ref.removeEventListener(listener)
+        }
+
+        // --------------------------------------------------------
+        // Create listener
+        // --------------------------------------------------------
+
+        scheduleListener =
+            object : ValueEventListener {
+
+                override fun onDataChange(
+                    snapshot: DataSnapshot
+                ) {
 
                     val startHour =
-                        snapshot.child("start_hour")
-                            .getValue(Int::class.java)
+                        snapshot.child(
+                            "start_hour"
+                        )
+                            .getValue(
+                                Int::class.java
+                            )
 
                     val endHour =
-                        snapshot.child("end_hour")
-                            .getValue(Int::class.java)
-
-                    if (startHour != null && endHour != null) {
-
-                        blockSchedule = BlockSchedule(
-                            startHour,
-                            endHour
+                        snapshot.child(
+                            "end_hour"
                         )
+                            .getValue(
+                                Int::class.java
+                            )
+
+                    if (
+                        startHour != null &&
+                        endHour != null
+                    ) {
+
+                        blockSchedule =
+                            BlockSchedule(
+                                startHour = startHour,
+                                endHour = endHour
+                            )
 
                         Log.d(
-                            "ChildService",
-                            "Updated block schedule: $blockSchedule"
+                            TAG,
+                            "Updated block schedule: " +
+                                    "$blockSchedule"
+                        )
+
+                    } else {
+
+                        blockSchedule = null
+
+                        Log.d(
+                            TAG,
+                            "No block schedule configured"
                         )
                     }
                 }
 
-                override fun onCancelled(error: DatabaseError) {}
-            })
+                override fun onCancelled(
+                    error: DatabaseError
+                ) {
+
+                    Log.e(
+                        TAG,
+                        "Block schedule listener cancelled: " +
+                                error.message
+                    )
+                }
+            }
+
+        // --------------------------------------------------------
+        // Attach listener
+        // --------------------------------------------------------
+
+        ref.addValueEventListener(
+            scheduleListener!!
+        )
+
+        Log.d(
+            TAG,
+            "✅ Block schedule listener attached"
+        )
     }
 
-    // -----------------------------
-    // 4️⃣ App Usage Tracking & Enforcement
-    // -----------------------------
+    // ============================================================
+    // USAGE TRACKING
+    // ============================================================
+
     private fun startUsageTracking() {
+
         if (!hasUsageAccess()) {
-            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+
+            Log.e(
+                TAG,
+                "⚠️ Usage Access is NOT granted"
+            )
+
+            Log.e(
+                TAG,
+                "⚠️ App limit enforcement cannot run"
+            )
+
             return
         }
 
-        handler.post(object : Runnable {
-            override fun run() {
-                enforceLimits()
-                handler.postDelayed(this, 15000)
-            }
-        })
+        Log.e(
+            TAG,
+            "✅ Usage Access confirmed"
+        )
+
+        // --------------------------------------------------------
+        // Prevent duplicate enforcement loops
+        // --------------------------------------------------------
+
+        handler.removeCallbacks(
+            enforcementRunnable
+        )
+
+        // --------------------------------------------------------
+        // Start enforcement
+        // --------------------------------------------------------
+
+        handler.post(
+            enforcementRunnable
+        )
+
+        Log.e(
+            TAG,
+            "✅ Usage enforcement loop started"
+        )
     }
 
-   private fun enforceLimits() {
+    private val enforcementRunnable =
+        object : Runnable {
 
-        val now = java.util.Calendar.getInstance()
+            override fun run() {
 
-        val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
+                try {
 
-       val minute = now.get(java.util.Calendar.MINUTE)
+                    enforceLimits()
 
-        val currentApp = getForegroundApp() ?: return
+                } catch (e: Exception) {
 
-        val rule = monitoredApps[currentApp] ?: return
+                    Log.e(
+                        TAG,
+                        "❌ enforceLimits() failed",
+                        e
+                    )
+                }
 
+                handler.postDelayed(
+                    this,
+                    ENFORCEMENT_INTERVAL
+                )
+            }
+        }
 
-       // ---------------------------------------
-// APP ALLOWED TIME WINDOW
-// ---------------------------------------
+    // ============================================================
+    // ENFORCEMENT
+    // ============================================================
 
-       val currentMinutes = hour * 60 + minute
+    private fun enforceLimits() {
 
-       val allowedFrom =
-           rule.allowed_from_hour * 60 +
-                   rule.allowed_from_minute
+        val now =
+            Calendar.getInstance()
 
-       val allowedTo =
-           rule.allowed_to_hour * 60 +
-                   rule.allowed_to_minute
+        val hour =
+            now.get(
+                Calendar.HOUR_OF_DAY
+            )
 
+        val minute =
+            now.get(
+                Calendar.MINUTE
+            )
 
-       val outsideAllowedTime =
-           if (allowedFrom <= allowedTo) {
+        // --------------------------------------------------------
+        // Current foreground app
+        // --------------------------------------------------------
 
-               // Normal range (e.g. 08:00 -> 17:00)
-               currentMinutes < allowedFrom ||
-                       currentMinutes > allowedTo
+        val currentApp =
+            getForegroundApp()
+                ?: return
 
-           } else {
+        // --------------------------------------------------------
+        // Find rule
+        // --------------------------------------------------------
 
-               // Overnight range (e.g. 22:00 -> 06:00)
-               currentMinutes > allowedTo &&
-                       currentMinutes < allowedFrom
-           }
+        val rule =
+            monitoredApps[currentApp]
+                ?: return
 
-        val inBlockedTime = blockSchedule?.let {
-            if (it.startHour <= it.endHour)
-                hour in it.startHour until it.endHour
-            else
-                hour >= it.startHour || hour < it.endHour
-        } ?: false
+        // ========================================================
+        // ALLOWED TIME WINDOW
+        // ========================================================
 
-        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val currentMinutes =
+            hour * 60 + minute
 
-        val endTime = System.currentTimeMillis()
+        val allowedFrom =
+            rule.allowed_from_hour * 60 +
+                    rule.allowed_from_minute
 
-        val startTime = endTime - 24 * 60 * 60 * 1000L
+        val allowedTo =
+            rule.allowed_to_hour * 60 +
+                    rule.allowed_to_minute
 
-        /*val stats = usm.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY,
-            startTime,
-            endTime
-        ).firstOrNull {
-            it.packageName == currentApp
-        } ?: return
+        val outsideAllowedTime =
+            if (allowedFrom <= allowedTo) {
 
-        val totalTime = stats.totalTimeInForeground*/
-       val stats = usm.queryUsageStats(
-           UsageStatsManager.INTERVAL_DAILY,
-           startTime,
-           endTime
-       )
+                // Normal range
+                // Example: 08:00 -> 17:00
 
-       val appStats = stats.firstOrNull {
-           it.packageName == currentApp
-       } ?: return
+                currentMinutes < allowedFrom ||
+                        currentMinutes > allowedTo
 
-       val totalTime = appStats.totalTimeInForeground
+            } else {
+
+                // Overnight range
+                // Example: 22:00 -> 06:00
+
+                currentMinutes > allowedTo &&
+                        currentMinutes < allowedFrom
+            }
+
+        // ========================================================
+        // BLOCK SCHEDULE
+        // ========================================================
+
+        val inBlockedTime =
+            blockSchedule?.let {
+
+                if (
+                    it.startHour <=
+                    it.endHour
+                ) {
+
+                    hour in
+                            it.startHour until
+                            it.endHour
+
+                } else {
+
+                    hour >= it.startHour ||
+                            hour < it.endHour
+                }
+
+            } ?: false
+
+        // ========================================================
+        // USAGE STATS
+        // ========================================================
+
+        val usm =
+            getSystemService(
+                Context.USAGE_STATS_SERVICE
+            ) as UsageStatsManager
+
+        val endTime =
+            System.currentTimeMillis()
+
+        val startTime =
+            endTime -
+                    24 * 60 * 60 * 1000L
+
+        val stats =
+            usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startTime,
+                endTime
+            )
+
+        val appStats =
+            stats.firstOrNull {
+                it.packageName ==
+                        currentApp
+            }
+                ?: return
+
+        val totalTime =
+            appStats.totalTimeInForeground
+
+        // ========================================================
+        // DAILY LIMIT
+        // ========================================================
 
         val isOverLimit =
             rule.daily_limit > 0 &&
                     totalTime > rule.daily_limit
 
+        // ========================================================
+        // PARENT BLOCK
+        // ========================================================
+
         if (rule.blocked) {
 
-            //blockApp(currentApp)
             blockApp(
                 currentApp,
                 "PARENT_BLOCK"
             )
 
-            sendAppAlert(currentApp, "Blocked by parent")
+            sendAppAlert(
+                currentApp,
+                "Blocked by parent"
+            )
 
             return
         }
 
+        // ========================================================
+        // SCHEDULE BLOCK
+        // ========================================================
+
         if (inBlockedTime) {
 
-            //blockApp(currentApp)
             blockApp(
                 currentApp,
                 "SCHEDULE"
             )
 
-            sendAppAlert(currentApp, "Blocked by schedule")
+            sendAppAlert(
+                currentApp,
+                "Blocked by schedule"
+            )
 
             return
         }
 
-       // ---------------------------------------
-// APP ALLOWED TIME WINDOW
-// ---------------------------------------
+        // ========================================================
+        // ALLOWED TIME WINDOW
+        // ========================================================
 
-       if (outsideAllowedTime) {
+        if (outsideAllowedTime) {
 
-           val unlockTime = Calendar.getInstance().apply {
+            val unlockTime =
+                Calendar.getInstance().apply {
 
-               set(
-                   Calendar.HOUR_OF_DAY,
-                   rule.allowed_from_hour
-               )
+                    set(
+                        Calendar.HOUR_OF_DAY,
+                        rule.allowed_from_hour
+                    )
 
-               set(
-                   Calendar.MINUTE,
-                   rule.allowed_from_minute
-               )
+                    set(
+                        Calendar.MINUTE,
+                        rule.allowed_from_minute
+                    )
 
-               set(Calendar.SECOND, 0)
-               set(Calendar.MILLISECOND, 0)
+                    set(
+                        Calendar.SECOND,
+                        0
+                    )
 
-               if (timeInMillis <= System.currentTimeMillis()) {
-                   add(Calendar.DAY_OF_YEAR, 1)
-               }
-           }
+                    set(
+                        Calendar.MILLISECOND,
+                        0
+                    )
 
-           blockApp(
-               currentApp,
-               "TIME_WINDOW",
-               unlockTime.timeInMillis
-           )
+                    if (
+                        timeInMillis <=
+                        System.currentTimeMillis()
+                    ) {
 
-           sendAppAlert(
-               currentApp,
-               "Outside allowed time"
-           )
+                        add(
+                            Calendar.DAY_OF_YEAR,
+                            1
+                        )
+                    }
+                }
 
-           return
-       }
+            blockApp(
+                currentApp,
+                "TIME_WINDOW",
+                unlockTime.timeInMillis
+            )
 
-       if (rule.daily_limit > 0 && isOverLimit) {
+            sendAppAlert(
+                currentApp,
+                "Outside allowed time"
+            )
 
-           val tomorrow = Calendar.getInstance().apply {
-               add(Calendar.DAY_OF_YEAR, 1)
-               set(Calendar.HOUR_OF_DAY, 0)
-               set(Calendar.MINUTE, 0)
-               set(Calendar.SECOND, 0)
-               set(Calendar.MILLISECOND, 0)
-           }
+            return
+        }
 
-           blockApp(
-               currentApp,
-               "LIMIT",
-               tomorrow.timeInMillis
-           )
+        // ========================================================
+        // DAILY LIMIT
+        // ========================================================
 
-           sendAppAlert(
-               currentApp,
-               "Daily limit reached"
-           )
+        if (
+            rule.daily_limit > 0 &&
+            isOverLimit
+        ) {
 
-           return
-       }
-        if (rule.block_after_9pm && hour >= 21) {
+            val tomorrow =
+                Calendar.getInstance().apply {
 
-           //blockApp(currentApp)
-            val morning = java.util.Calendar.getInstance().apply {
+                    add(
+                        Calendar.DAY_OF_YEAR,
+                        1
+                    )
 
-                if (hour >= 21)
-                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                    set(
+                        Calendar.HOUR_OF_DAY,
+                        0
+                    )
 
-                set(java.util.Calendar.HOUR_OF_DAY, 6)
-                set(java.util.Calendar.MINUTE, 0)
-                set(java.util.Calendar.SECOND, 0)
-                set(java.util.Calendar.MILLISECOND, 0)
-            }
+                    set(
+                        Calendar.MINUTE,
+                        0
+                    )
+
+                    set(
+                        Calendar.SECOND,
+                        0
+                    )
+
+                    set(
+                        Calendar.MILLISECOND,
+                        0
+                    )
+                }
+
+            blockApp(
+                currentApp,
+                "LIMIT",
+                tomorrow.timeInMillis
+            )
+
+            sendAppAlert(
+                currentApp,
+                "Daily limit reached"
+            )
+
+            return
+        }
+
+        // ========================================================
+        // 9 PM BLOCK
+        // ========================================================
+
+        if (
+            rule.block_after_9pm &&
+            hour >= 21
+        ) {
+
+            val morning =
+                Calendar.getInstance().apply {
+
+                    add(
+                        Calendar.DAY_OF_YEAR,
+                        1
+                    )
+
+                    set(
+                        Calendar.HOUR_OF_DAY,
+                        6
+                    )
+
+                    set(
+                        Calendar.MINUTE,
+                        0
+                    )
+
+                    set(
+                        Calendar.SECOND,
+                        0
+                    )
+
+                    set(
+                        Calendar.MILLISECOND,
+                        0
+                    )
+                }
 
             blockApp(
                 currentApp,
@@ -409,96 +1070,170 @@ class ChildAppControlService : Service() {
                 morning.timeInMillis
             )
 
-            sendAppAlert(currentApp, "Blocked after 9 PM")
+            sendAppAlert(
+                currentApp,
+                "Blocked after 9 PM"
+            )
         }
     }
-    /*private fun blockApp(packageName: String) {
-        val intent = Intent(this, AppBlockOverlayActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        }
 
-        intent.putExtra("blockedApp", packageName)
-        startActivity(intent)
-    }*/
+    // ============================================================
+    // BLOCK APP
+    // ============================================================
+
     private fun blockApp(
         packageName: String,
         reason: String,
         endTime: Long = 0L
     ) {
+
         Log.e(
             "BLOCK_FLOW",
-            "Launching overlay for $packageName reason=$reason"
+            "Launching overlay for " +
+                    "$packageName reason=$reason"
         )
 
-        val intent = Intent(this, AppBlockOverlayActivity::class.java).apply {
+        val intent =
+            Intent(
+                this,
+                AppBlockOverlayActivity::class.java
+            ).apply {
 
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                )
 
-            putExtra("blockedApp", packageName)
-            putExtra("reason", reason)
-            putExtra("endTime", endTime)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+
+                addFlags(
+                    Intent.FLAG_ACTIVITY_CLEAR_TASK
+                )
+
+                putExtra(
+                    "blockedApp",
+                    packageName
+                )
+
+                putExtra(
+                    "reason",
+                    reason
+                )
+
+                putExtra(
+                    "endTime",
+                    endTime
+                )
+            }
+
+        try {
+
+            startActivity(intent)
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ Failed launching block overlay",
+                e
+            )
         }
+    }
 
-        startActivity(intent)
+    // ============================================================
+    // SEND APP ALERT
+    // ============================================================
+
+    private fun sendAppAlert(
+        app: String,
+        reason: String
+    ) {
+
+        val alert =
+            mapOf(
+                "app" to app,
+                "reason" to reason,
+                "timestamp" to
+                        System.currentTimeMillis()
+            )
+
+        db.child("children")
+            .child(childId)
+            .child("app_alerts")
+            .push()
+            .setValue(alert)
     }
-    private fun sendAppAlert(app: String, reason: String) {
-        val alert = mapOf(
-            "app" to app,
-            "reason" to reason,
-            "timestamp" to System.currentTimeMillis()
-        )
-        db.child("children").child(childId).child("app_alerts").push().setValue(alert)
-    }
+
+    // ============================================================
+    // USAGE ACCESS
+    // ============================================================
 
     private fun hasUsageAccess(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
 
-        val mode = appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            packageName
-        )
+        val appOps =
+            getSystemService(
+                Context.APP_OPS_SERVICE
+            ) as AppOpsManager
 
-        return mode == AppOpsManager.MODE_ALLOWED
+        val mode =
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                packageName
+            )
+
+        return mode ==
+                AppOpsManager.MODE_ALLOWED
     }
+
+    // ============================================================
+    // FOREGROUND APP
+    // ============================================================
 
     private fun getForegroundApp(): String? {
 
-        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val usm =
+            getSystemService(
+                Context.USAGE_STATS_SERVICE
+            ) as UsageStatsManager
 
-        val endTime = System.currentTimeMillis()
+        val endTime =
+            System.currentTimeMillis()
 
-        val stats = usm.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY,
-            endTime - 60_000,
-            endTime
-        )
+        val stats =
+            usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                endTime - 60_000L,
+                endTime
+            )
 
-        if (stats.isNullOrEmpty()) return null
+        if (
+            stats.isNullOrEmpty()
+        ) {
+            return null
+        }
 
-        return stats.maxByOrNull { it.lastTimeUsed }?.packageName
+        return stats
+            .maxByOrNull {
+                it.lastTimeUsed
+            }
+            ?.packageName
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    // ============================================================
+    // BIND
+    // ============================================================
 
-    // -----------------------------
-    // Data classes
-    // -----------------------------
-    data class AppRule(
-        val allowed_from_hour: Int = 0,
-        val allowed_from_minute: Int = 0,
-        val allowed_to_hour: Int = 23,
-        val allowed_to_minute: Int = 59,
-        val block_after_9pm: Boolean = false,
-        val block_after_limit: Boolean = false,
-        val blocked: Boolean = false,
-        val daily_limit: Long = 0L,
-        val display_name: String = ""
-    )
+    override fun onBind(
+        intent: Intent?
+    ): IBinder? {
+        return null
+    }
+
+    // ============================================================
+    // BLOCK SCHEDULE
+    // ============================================================
 
     data class BlockSchedule(
         val startHour: Int,

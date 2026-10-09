@@ -6,17 +6,23 @@ data class ChildModel(
 )
 
 // Optional: a model for a call record (if you want to represent calls locally)
+
 data class CallRecord(
     val number: String = "",
-    val direction: String = "", // INCOMING / OUTGOING
+    val direction: String = "", // INCOMING / OUTGOING / MISSED
+
+    // Contact information
+    val contactName: String = "",
+    val contactSaved: Boolean = false,
+
     val timestamp: Long = 0L,
     val duration: Long = 0L,
+
     val provider: String = "Unknown",
     val country: String = "Unknown",
     val simSlot: Int = -1,
     val simCarrier: String = "Unknown",
     val subscriptionId: Int = -1
-
 )
 
 data class Message(

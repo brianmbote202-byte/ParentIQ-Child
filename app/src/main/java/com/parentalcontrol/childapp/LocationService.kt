@@ -133,9 +133,16 @@ class ChildLocationService : Service() {
         Log.d(TAG, "Initial place cache: $lastPlaceData")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
+
+        isRunning = true
 
         startForegroundNotification()
+
         childId = loadChildId()
 
         Log.d(
@@ -170,6 +177,7 @@ class ChildLocationService : Service() {
                         "❌ Child ID still missing. Stopping service."
                     )
 
+                    isRunning = false
                     stopSelf()
                 }
 
@@ -179,27 +187,40 @@ class ChildLocationService : Service() {
         }
 
         initializeLocation()
+
         return START_STICKY
     }
 
 
     override fun onDestroy() {
+
+        Log.e(
+            TAG,
+            "🛑 ChildLocationService destroyed"
+        )
+
         try {
-            fusedLocationClient?.removeLocationUpdates(locationCallback)
-            handler.removeCallbacks(stationaryRunnable)
+
+            fusedLocationClient
+                ?.removeLocationUpdates(locationCallback)
+
+            handler.removeCallbacks(
+                stationaryRunnable
+            )
+
             pushHistoryBatch()
 
-            // ❌ NEW: Mark child offline
-            childId?.let { id ->
-                childRef(id)
-                    .child("online")
-                    .setValue(false)
-            }
-
-
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to remove location updates", e)
+
+            Log.e(
+                TAG,
+                "❌ Failed to clean up location service",
+                e
+            )
         }
+
+        isRunning = false
+
         super.onDestroy()
     }
 

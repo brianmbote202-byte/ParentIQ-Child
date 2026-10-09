@@ -61,6 +61,8 @@ class SmsObserver(
          */
         private const val MAX_CACHE = 500
 
+        private const val PREFS_NAME = "sms_observer_prefs"
+        private const val PREF_PROCESSED_IDS = "processed_sms_ids"
         /**
          * Maximum number of rows inspected during one scan.
          */
@@ -102,6 +104,8 @@ class SmsObserver(
          */
         private val processedSmsIds =
             LinkedHashSet<Long>()
+
+        private var cacheLoaded = false
     }
 
     // ================================================================
@@ -140,6 +144,7 @@ class SmsObserver(
 
             return
         }
+        loadProcessedIds()
 
         try {
 
@@ -927,16 +932,9 @@ class SmsObserver(
                          */
                         if (serviceStartSucceeded) {
 
-                            synchronized(
-                                processedSmsIds
-                            ) {
-
-                                processedSmsIds.add(
-                                    smsId
-                                )
-
-                                trimProcessedCache()
-                            }
+                            markSmsProcessed(
+                                smsId
+                            )
 
                             processedCount++
 
@@ -1104,6 +1102,139 @@ class SmsObserver(
                 "unknown_number"
             }
     }
+
+
+// ================================================================
+// LOAD PERSISTENT PROCESSED IDS
+// ================================================================
+//
+// The in-memory cache is lost when MessageService is restarted.
+// Persist the Android SMS database IDs so the same SMS is not
+// repeatedly queued after a service restart.
+// ================================================================
+
+    private fun loadProcessedIds() {
+
+        if (cacheLoaded) {
+            return
+        }
+
+        synchronized(processedSmsIds) {
+
+            if (cacheLoaded) {
+                return
+            }
+
+            try {
+
+                val prefs =
+                    context.getSharedPreferences(
+                        PREFS_NAME,
+                        Context.MODE_PRIVATE
+                    )
+
+                val storedIds =
+                    prefs
+                        .getStringSet(
+                            PREF_PROCESSED_IDS,
+                            emptySet()
+                        )
+                        ?: emptySet()
+
+                processedSmsIds.clear()
+
+                storedIds
+                    .mapNotNull {
+                        it.toLongOrNull()
+                    }
+                    .sorted()
+                    .takeLast(MAX_CACHE)
+                    .forEach {
+                        processedSmsIds.add(it)
+                    }
+
+                Log.d(
+                    TAG,
+                    "Loaded persistent processed SMS IDs: " +
+                            "count=${processedSmsIds.size}"
+                )
+
+                cacheLoaded = true
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "Failed loading persistent SMS IDs",
+                    e
+                )
+
+                cacheLoaded = true
+            }
+        }
+    }
+
+// ================================================================
+// SAVE PROCESSED IDS
+// ================================================================
+
+    private fun saveProcessedIds() {
+
+        try {
+
+            val prefs =
+                context.getSharedPreferences(
+                    PREFS_NAME,
+                    Context.MODE_PRIVATE
+                )
+
+            val ids =
+                synchronized(processedSmsIds) {
+                    processedSmsIds
+                        .map {
+                            it.toString()
+                        }
+                        .toSet()
+                }
+
+            prefs
+                .edit()
+                .putStringSet(
+                    PREF_PROCESSED_IDS,
+                    ids
+                )
+                .apply()
+
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "Failed saving persistent SMS IDs",
+                e
+            )
+        }
+    }
+
+// ================================================================
+// MARK SMS PROCESSED
+// ================================================================
+
+    private fun markSmsProcessed(
+        smsId: Long
+    ) {
+
+        synchronized(processedSmsIds) {
+
+            processedSmsIds.add(
+                smsId
+            )
+
+            trimProcessedCache()
+        }
+
+        saveProcessedIds()
+    }
+
 
     // ================================================================
     // CACHE

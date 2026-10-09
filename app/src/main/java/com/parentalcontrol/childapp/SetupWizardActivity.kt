@@ -781,7 +781,7 @@ class SetupWizardActivity : AppCompatActivity() {
             3 -> "Required to monitor activity and block harmful content."
             4 -> "Required for real-time location tracking."
             5 -> "Required for SMS monitoring."
-            6 -> "Required for call activity monitoring."
+            6 -> "Required to monitor calls and identify saved contacts."
             7 -> "Required for social media monitoring."
             8 -> "Required to monitor app usage and screen time."
             9 -> "Required to display blocked content warnings."
@@ -796,7 +796,7 @@ class SetupWizardActivity : AppCompatActivity() {
             3 -> "Enable Accessibility Service for this app."
             4 -> "Allow location access and turn on GPS."
             5 -> "Grant SMS permissions when prompted."
-            6 -> "Grant Call permissions when prompted."
+            6 -> "Grant call and contacts permissions when prompted."
             7 -> "Tap Continue Setup to enable Notification Access.\n\n" +
                     "If your phone doesn't support it, you can skip this step."
             8 -> "Enable Usage Access for ParentIQ."
@@ -1139,10 +1139,11 @@ class SetupWizardActivity : AppCompatActivity() {
 
     //call request function
     private fun requestCallPermission() {
+
         val permissions = arrayOf(
             Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG
-
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.READ_CONTACTS
         )
 
         callPermissionLauncher.launch(permissions)
@@ -1251,17 +1252,26 @@ class SetupWizardActivity : AppCompatActivity() {
 
     //call permissions granting
     private fun isCallPermissionGranted(): Boolean {
-        val phone = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.READ_PHONE_STATE
-        ) == PackageManager.PERMISSION_GRANTED
 
-        val callLog = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.READ_CALL_LOG
-        ) == PackageManager.PERMISSION_GRANTED
+        val phone =
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
 
-        return phone && callLog
+        val callLog =
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CALL_LOG
+            ) == PackageManager.PERMISSION_GRANTED
+
+        val contacts =
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CONTACTS
+            ) == PackageManager.PERMISSION_GRANTED
+
+        return phone && callLog && contacts
     }
 
     private fun startLocationService() {

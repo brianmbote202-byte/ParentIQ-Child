@@ -522,45 +522,13 @@ class ScreenTimeService : Service() {
 
         Log.e(
             TAG,
-            "⚠ Task removed"
+            "⚠️ ScreenTimeService task removed"
         )
 
-        try {
-
-            val restartIntent =
-                Intent(
-                    applicationContext,
-                    ScreenTimeService::class.java
-                )
-
-            restartIntent.setPackage(packageName)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-                startForegroundService(
-                    restartIntent
-                )
-
-            } else {
-
-                startService(
-                    restartIntent
-                )
-            }
-
-            Log.e(
-                TAG,
-                "✅ Restart requested"
-            )
-
-        } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ Restart failed",
-                e
-            )
-        }
+        Log.e(
+            TAG,
+            "ℹ️ Service will be recovered through the central recovery architecture"
+        )
 
         super.onTaskRemoved(rootIntent)
     }

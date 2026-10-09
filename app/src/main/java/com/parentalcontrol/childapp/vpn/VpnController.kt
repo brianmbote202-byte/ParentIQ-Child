@@ -3,8 +3,7 @@ package com.parentalcontrol.childapp.vpn
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import android.os.Handler
-import android.os.Looper
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 
@@ -12,69 +11,143 @@ object VpnController {
 
     private const val TAG = "VpnController"
 
-    private var lastStart = 0L
-    private var retryCount = 0
-
+    /**
+     * Starts the VPN when the application has permission
+     * to establish the VPN tunnel.
+     *
+     * This method is intended for a legitimate user/app
+     * initiated start.
+     *
+     * It does NOT implement an automatic retry loop.
+     * Recovery is handled separately by the VPN lifecycle.
+     */
     fun startVpn(context: Context) {
 
-        val now = System.currentTimeMillis()
+        val appContext =
+            context.applicationContext
 
-        // 🔥 anti-spam guard
-        if (now - lastStart < 5000) {
-            Log.e(TAG, "⛔ VPN start throttled")
-            return
-        }
-
-        Log.e(TAG, "🔥 startVpn() called")
-
-        lastStart = now
-
-        val prefs = context.getSharedPreferences("child_prefs", Context.MODE_PRIVATE)
-
-        if (!prefs.getBoolean("vpn_allowed", true)) {
-            Log.e(TAG, "❌ VPN disabled in prefs")
-            return
-        }
+        Log.e(
+            TAG,
+            "🔥 startVpn() called"
+        )
 
         try {
 
-            // 🔥 CRITICAL FIX: VPN permission check
-            val prepareIntent = VpnService.prepare(context)
+            val prefs =
+                appContext.getSharedPreferences(
+                    "child_prefs",
+                    Context.MODE_PRIVATE
+                )
 
-            if (prepareIntent != null) {
-                Log.e(TAG, "❌ VPN permission NOT granted (user must approve once)")
+            val vpnAllowed =
+                prefs.getBoolean(
+                    "vpn_allowed",
+                    true
+                )
+
+            if (!vpnAllowed) {
+
+                Log.e(
+                    TAG,
+                    "🚫 VPN disabled in child settings"
+                )
+
                 return
             }
 
-            Log.e(TAG, "🚀 Starting VPN service")
+            // =================================================
+            // VPN PERMISSION
+            // =================================================
 
-            val intent = Intent(context, DnsVpnService::class.java)
-            ContextCompat.startForegroundService(context, intent)
+            val prepareIntent =
+                VpnService.prepare(appContext)
 
-            retryCount = 0
+            if (prepareIntent != null) {
+
+                Log.e(
+                    TAG,
+                    "⚠️ VPN permission is not available"
+                )
+
+                Log.e(
+                    TAG,
+                    "ℹ️ User authorization is required"
+                )
+
+                return
+            }
+
+            // =================================================
+            // START VPN
+            // =================================================
+
+            val intent =
+                Intent(
+                    appContext,
+                    DnsVpnService::class.java
+                )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+                ContextCompat.startForegroundService(
+                    appContext,
+                    intent
+                )
+
+            } else {
+
+                appContext.startService(
+                    intent
+                )
+            }
+
+            Log.e(
+                TAG,
+                "✅ VPN start request sent"
+            )
 
         } catch (e: Exception) {
 
-            Log.e(TAG, "❌ VPN start failed", e)
-
-            retryCount++
-
-            if (retryCount <= 2) {
-
-                Handler(Looper.getMainLooper()).postDelayed({
-                    startVpn(context)
-                }, 5000 * retryCount.toLong())
-            }
+            Log.e(
+                TAG,
+                "❌ VPN start request failed",
+                e
+            )
         }
     }
 
+    /**
+     * Explicitly stops the VPN.
+     *
+     * This should only be called when the application/user
+     * intentionally disables VPN protection.
+     */
     fun stopVpn(context: Context) {
 
+        val appContext =
+            context.applicationContext
+
         try {
-            context.stopService(Intent(context, DnsVpnService::class.java))
-            Log.e(TAG, "🛑 VPN stopped")
+
+            appContext.stopService(
+                Intent(
+                    appContext,
+                    DnsVpnService::class.java
+                )
+            )
+
+            Log.e(
+                TAG,
+                "🛑 VPN stop requested"
+            )
+
         } catch (e: Exception) {
-            Log.e(TAG, "❌ VPN stop failed", e)
+
+            Log.e(
+                TAG,
+                "❌ VPN stop failed",
+                e
+            )
         }
     }
 }

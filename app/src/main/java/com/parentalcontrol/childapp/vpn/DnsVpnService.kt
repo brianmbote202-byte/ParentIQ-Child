@@ -14,49 +14,120 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.parentalcontrol.childapp.R
 import java.io.FileInputStream
-import com.parentalcontrol.childapp.service.BrowsingTracker
+import android.os.Build
+import android.content.Context
+import androidx.core.content.ContextCompat
 
 @SuppressLint("VpnServicePolicy")
 class DnsVpnService : VpnService() {
 
     companion object {
+
         private const val TAG = "DnsVpnService"
-        private const val CHANNEL_ID = "child_vpn_channel"
-        private const val NOTIFICATION_ID = 1001
 
-        private const val RESTART_COOLDOWN = 3000L
+        private const val CHANNEL_ID =
+            "child_vpn_channel"
 
-        @Volatile var isRunning = false
-        @Volatile var isStarting = false
-        @Volatile var lastHeartbeat = 0L
-        @Volatile var lastStartTime = 0L
+        private const val NOTIFICATION_ID =
+            1001
 
-        private val eventQueue = java.util.concurrent.ArrayBlockingQueue<String>(300)
-        //private const val DEBUG = false   // ✅ ADD THIS
+        private const val RESTART_COOLDOWN =
+            3000L
+
+        private const val WATCHDOG_INTERVAL =
+            10_000L
+
+        private const val WATCHDOG_TIMEOUT =
+            120_000L
+
+        private const val URL_BROADCAST =
+            "com.parentalcontrol.childapp.URL_DETECTED"
+
+        @Volatile
+        var isRunning = false
+
+        @Volatile
+        var isStarting = false
+
+        @Volatile
+        var lastHeartbeat = 0L
+
+        @Volatile
+        var lastStartTime = 0L
+
+        private val eventQueue =
+            java.util.concurrent.ArrayBlockingQueue<String>(300)
+
         private const val DEBUG = true
+
+        fun start(context: Context) {
+
+            try {
+
+                val appContext =
+                    context.applicationContext
+
+                val intent =
+                    Intent(
+                        appContext,
+                        DnsVpnService::class.java
+                    )
+
+                Log.e(
+                    TAG,
+                    "🚀 REQUESTING VPN START"
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+                    ContextCompat.startForegroundService(
+                        appContext,
+                        intent
+                    )
+
+                } else {
+
+                    appContext.startService(intent)
+                }
+
+            } catch (e: Exception) {
+
+                Log.e(
+                    TAG,
+                    "❌ VPN START REQUEST FAILED",
+                    e
+                )
+            }
+        }
     }
+
     // =====================================================
     // VPN
     // =====================================================
 
     private var readerThread: Thread? = null
+
     private var workerThread: Thread? = null
-    private var watchdogHandler = Handler(Looper.getMainLooper())
-    private var watchdogRunning = false
 
-    private var vpnInterface:
-            ParcelFileDescriptor? = null
-
-    private var browsingTracker: BrowsingTracker? = null
+    private val watchdogHandler =
+        Handler(Looper.getMainLooper())
 
     private val handler =
         Handler(Looper.getMainLooper())
+
+    private var watchdogRunning = false
+
+    private var workerRunning = false
+
+    private var vpnInterface:
+            ParcelFileDescriptor? = null
 
     // =====================================================
     // DOMAIN THROTTLING
     // =====================================================
 
     private var lastDomain = ""
+
     private var lastDomainTime = 0L
 
     // =====================================================
@@ -67,241 +138,594 @@ class DnsVpnService : VpnService() {
 
         super.onCreate()
 
-        Log.e(TAG, "🔥 VPN onCreate")
+        Log.e(
+            TAG,
+            "🔥🔥🔥 VPN SERVICE CREATED 🔥🔥🔥"
+        )
 
-        val childId = getChildId()
+        /*
+         * IMPORTANT:
+         *
+         * BrowsingTracker is intentionally NOT created here.
+         *
+         * BrowserAccessibilityService owns the tracker.
+         *
+         * The VPN sends URL_DETECTED broadcasts and the
+         * accessibility-side BrowsingTracker receives them.
+         *
+         * This prevents two BrowsingTracker instances from
+         * processing the same browsing activity.
+         */
 
-        browsingTracker =
-            BrowsingTracker(
-                context = applicationContext,
-                childId = childId
+        try {
+
+            startForegroundSafe()
+
+            log(
+                "✅ VPN FOREGROUND STARTED"
             )
 
-        startForegroundSafe()
-        //startEventWorker()
+        } catch (e: Exception) {
 
-        //isRunning = true
-
-        log("🔥 SERVICE CREATED + FOREGROUND STARTED")
+            Log.e(
+                TAG,
+                "❌ Failed to start VPN foreground",
+                e
+            )
+        }
     }
 
     // =====================================================
     // START
     // =====================================================
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
-        Log.e(TAG, "🚀 VPN onStartCommand")
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
 
-        val now = System.currentTimeMillis()
+        Log.e(
+            TAG,
+            "🚀 VPN onStartCommand"
+        )
 
-        // =====================================================
-        // STEP 1 - HARD RESTART COOLDOWN (IMPORTANT FIX)
-        // =====================================================
-        if (now - lastStartTime < RESTART_COOLDOWN) {
-            log("⛔ Start blocked (cooldown)")
+        val now =
+            System.currentTimeMillis()
+
+        // =================================================
+        // HARD RESTART COOLDOWN
+        // =================================================
+
+        if (
+            now - lastStartTime <
+            RESTART_COOLDOWN
+        ) {
+
+            log(
+                "⛔ Start blocked by cooldown"
+            )
+
             return START_STICKY
         }
 
-        // =====================================================
-        // STEP 2 - DOUBLE START PROTECTION
-        // =====================================================
-        if (isStarting) return START_STICKY
+        // =================================================
+        // DOUBLE START PROTECTION
+        // =================================================
+
+        if (isStarting) {
+
+            log(
+                "⛔ Start already in progress"
+            )
+
+            return START_STICKY
+        }
+
+        // =================================================
+        // ALREADY RUNNING
+        // =================================================
+
+        if (
+            isRunning &&
+            vpnInterface != null
+        ) {
+
+            log(
+                "✅ VPN already running"
+            )
+
+            return START_STICKY
+        }
+
         isStarting = true
 
         try {
 
+            // =================================================
+            // CLEAR STALE STATE
+            // =================================================
+
             if (vpnInterface != null) {
-                isStarting = false
-                return START_STICKY
+
+                log(
+                    "⚠ Closing stale VPN interface"
+                )
+
+                try {
+                    vpnInterface?.close()
+                } catch (_: Exception) {}
+
+                vpnInterface = null
             }
 
-            if (VpnService.prepare(this) != null) {
+            // =================================================
+            // VPN PERMISSION
+            // =================================================
 
-                Log.e(TAG, "❌ VPN permission missing")
+            if (
+                VpnService.prepare(this) != null
+            ) {
+
+                Log.e(
+                    TAG,
+                    "❌ VPN permission missing"
+                )
+
+                isStarting = false
+
+                /*
+                 * Do not repeatedly restart a VPN that has
+                 * no user-granted VPN permission.
+                 */
 
                 stopSelf()
 
                 return START_NOT_STICKY
             }
 
-            Log.e(TAG, "VPN permission confirmed")
+            Log.e(
+                TAG,
+                "✅ VPN permission confirmed"
+            )
 
-            val builder = Builder()
-                .setSession("Child Protection")
-                .addAddress("10.0.0.2", 24)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
+            // =================================================
+            // VPN BUILDER
+            // =================================================
 
-            Log.e(TAG, "Calling builder.establish()")
+            val builder =
+                Builder()
+                    .setSession(
+                        "Child Protection"
+                    )
+                    .addAddress(
+                        "10.0.0.2",
+                        24
+                    )
+                    .addDnsServer(
+                        "1.1.1.1"
+                    )
+                    .addDnsServer(
+                        "8.8.8.8"
+                    )
 
-            builder.allowFamily(android.system.OsConstants.AF_INET)
-            builder.allowFamily(android.system.OsConstants.AF_INET6)
+            /*
+             * Keep both IPv4 and IPv6 enabled.
+             */
 
-            vpnInterface = builder.establish()
+            builder.allowFamily(
+                android.system.OsConstants.AF_INET
+            )
 
-            Log.e(TAG, "builder.establish() result = $vpnInterface")
+            builder.allowFamily(
+                android.system.OsConstants.AF_INET6
+            )
+
+            // =================================================
+            // ESTABLISH VPN
+            // =================================================
+
+            Log.e(
+                TAG,
+                "🌐 Calling builder.establish()"
+            )
+
+            vpnInterface =
+                builder.establish()
+
+            Log.e(
+                TAG,
+                "🌐 builder.establish() result = $vpnInterface"
+            )
 
             if (vpnInterface == null) {
 
-                Log.e(TAG, "❌ builder.establish() returned null")
+                Log.e(
+                    TAG,
+                    "❌ builder.establish() returned null"
+                )
 
                 isStarting = false
+
                 stopSelf()
 
                 return START_NOT_STICKY
             }
+
+            // =================================================
+            // MARK RUNNING
+            // =================================================
+
             isRunning = true
+
+            lastStartTime = now
+
+            lastHeartbeat = now
+
+            isStarting = false
+
+            // =================================================
+            // START MONITORING
+            // =================================================
 
             startTunnelReader()
+
             startEventWorker()
+
             startWatchdog()
 
-            // =================================================
-            // STEP 3 - MARK SUCCESSFUL START
-            // =================================================
-            isRunning = true
-            lastStartTime = now
-            lastHeartbeat = now
-            isStarting = false
+            Log.e(
+                TAG,
+                "=========================================="
+            )
 
-            /*startTunnelReader()
-            startEventWorker()
-            startWatchdog()*/
+            Log.e(
+                TAG,
+                "✅ VPN STARTED SUCCESSFULLY"
+            )
 
-            log("VPN STARTED STABLE")
+            Log.e(
+                TAG,
+                "🌐 DNS monitoring active"
+            )
+
+            Log.e(
+                TAG,
+                "=========================================="
+            )
 
         } catch (e: Exception) {
-            Log.e(TAG, "START ERROR", e)
+
+            Log.e(
+                TAG,
+                "❌ VPN START ERROR",
+                e
+            )
+
             isStarting = false
+
             cleanup()
         }
 
+        /*
+         * IMPORTANT:
+         *
+         * START_STICKY allows Android to recreate the service
+         * if the process/service is killed.
+         *
+         * Boot recovery is additionally handled by
+         * SystemBootOrchestrator.
+         */
+
         return START_STICKY
     }
+
     // =====================================================
     // TUNNEL READER
     // =====================================================
+
     private fun startTunnelReader() {
 
         readerThread?.interrupt()
-        readerThread = Thread {
 
-            val buffer = ByteArray(32767)
+        readerThread =
+            Thread {
 
-            try {
-                val fd = vpnInterface?.fileDescriptor ?: return@Thread
-                val inputStream = FileInputStream(fd)
+                val buffer =
+                    ByteArray(32767)
 
-                log("DNS MONITOR STARTED")
+                try {
 
-                while (isRunning && !Thread.currentThread().isInterrupted) {
+                    val fd =
+                        vpnInterface
+                            ?.fileDescriptor
+                            ?: return@Thread
 
-                    try {
-                        lastHeartbeat = System.currentTimeMillis()
+                    val inputStream =
+                        FileInputStream(fd)
 
-                        val length = try {
-                            inputStream.read(buffer)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "READ ERROR", e)
+                    log(
+                        "🌐 DNS MONITOR STARTED"
+                    )
+
+                    while (
+                        isRunning &&
+                        !Thread.currentThread()
+                            .isInterrupted
+                    ) {
+
+                        try {
+
+                            lastHeartbeat =
+                                System.currentTimeMillis()
+
+                            val length =
+                                try {
+
+                                    inputStream.read(
+                                        buffer
+                                    )
+
+                                } catch (e: Exception) {
+
+                                    Log.e(
+                                        TAG,
+                                        "❌ DNS READ ERROR",
+                                        e
+                                    )
+
+                                    break
+                                }
+
+                            if (length <= 0) {
+
+                                Thread.sleep(5)
+
+                                continue
+                            }
+
+                            if (length < 28) {
+                                continue
+                            }
+
+                            val packet =
+                                buffer.copyOf(
+                                    length
+                                )
+
+                            // =================================================
+                            // IPV4 ONLY FOR CURRENT DNS PARSER
+                            // =================================================
+
+                            val version =
+                                (
+                                        packet[0]
+                                            .toInt() and 0xFF
+                                        ) shr 4
+
+                            if (version != 4) {
+                                continue
+                            }
+
+                            val protocol =
+                                packet[9]
+                                    .toInt() and 0xFF
+
+                            /*
+                             * UDP = 17
+                             */
+
+                            if (protocol != 17) {
+                                continue
+                            }
+
+                            val ipHeaderLen =
+                                (
+                                        packet[0]
+                                            .toInt() and 0x0F
+                                        ) * 4
+
+                            if (
+                                ipHeaderLen < 20 ||
+                                ipHeaderLen + 8 >=
+                                packet.size
+                            ) {
+                                continue
+                            }
+
+                            val srcPort =
+                                (
+                                        (
+                                                packet[
+                                                    ipHeaderLen
+                                                ]
+                                                    .toInt()
+                                                        and 0xFF
+                                                ) shl 8
+                                        ) or
+                                        (
+                                                packet[
+                                                    ipHeaderLen + 1
+                                                ]
+                                                    .toInt()
+                                                        and 0xFF
+                                                )
+
+                            val dstPort =
+                                (
+                                        (
+                                                packet[
+                                                    ipHeaderLen + 2
+                                                ]
+                                                    .toInt()
+                                                        and 0xFF
+                                                ) shl 8
+                                        ) or
+                                        (
+                                                packet[
+                                                    ipHeaderLen + 3
+                                                ]
+                                                    .toInt()
+                                                        and 0xFF
+                                                )
+
+                            /*
+                             * Only DNS traffic.
+                             */
+
+                            if (
+                                srcPort != 53 &&
+                                dstPort != 53
+                            ) {
+                                continue
+                            }
+
+                            val domain =
+                                try {
+
+                                    parseDnsSafe(
+                                        packet,
+                                        ipHeaderLen
+                                    )
+
+                                } catch (_: Exception) {
+
+                                    null
+                                }
+
+                            if (
+                                domain == null ||
+                                !isValidDomain(domain)
+                            ) {
+                                continue
+                            }
+
+                            val now =
+                                System.currentTimeMillis()
+
+                            val shouldSkip: Boolean
+
+                            synchronized(this) {
+
+                                shouldSkip =
+                                    domain ==
+                                            lastDomain &&
+                                            now -
+                                            lastDomainTime <
+                                            10_000
+
+                                if (!shouldSkip) {
+
+                                    lastDomain =
+                                        domain
+
+                                    lastDomainTime =
+                                        now
+                                }
+                            }
+
+                            if (shouldSkip) {
+                                continue
+                            }
+
+                            val url =
+                                "https://$domain"
+
+                            if (
+                                !eventQueue.offer(url)
+                            ) {
+
+                                Log.w(
+                                    TAG,
+                                    "⚠ Queue full. Dropping URL: $url"
+                                )
+                            }
+
+                            /*
+                             * Small CPU protection delay.
+                             */
+
+                            Thread.sleep(2)
+
+                        } catch (
+                            e: InterruptedException
+                        ) {
+
+                            Log.d(
+                                TAG,
+                                "DNS reader interrupted"
+                            )
+
                             break
-                        }
 
-                        if (length <= 0) {
-                            Thread.sleep(5)
-                            continue
-                        }
+                        } catch (e: Exception) {
 
-                        if (length < 28) continue
+                            Log.e(
+                                TAG,
+                                "❌ DNS LOOP ERROR",
+                                e
+                            )
 
-                        val packet = buffer.copyOf(length)
-
-                        val version = (packet[0].toInt() and 0xFF) shr 4
-                        if (version != 4) continue
-
-                        val protocol = packet[9].toInt() and 0xFF
-                        if (protocol != 17) continue
-
-                        val ipHeaderLen = (packet[0].toInt() and 0x0F) * 4
-                        if (ipHeaderLen < 20 || ipHeaderLen + 8 >= packet.size) continue
-
-                        val srcPort =
-                            ((packet[ipHeaderLen].toInt() and 0xFF) shl 8) or
-                                    (packet[ipHeaderLen + 1].toInt() and 0xFF)
-
-                        val dstPort =
-                            ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or
-                                    (packet[ipHeaderLen + 3].toInt() and 0xFF)
-
-                        if (srcPort != 53 && dstPort != 53) continue
-
-                        val domain = try {
-                            parseDnsSafe(packet, ipHeaderLen)
-                        } catch (_: Exception) {
-                            null
-                        } ?: continue
-
-                        if (!isValidDomain(domain)) continue
-
-                        val now = System.currentTimeMillis()
-
-                        val shouldSkip: Boolean
-
-                        synchronized(this) {
-                            shouldSkip =
-                                domain == lastDomain &&
-                                        now - lastDomainTime < 10000
-
-                            if (!shouldSkip) {
-                                lastDomain = domain
-                                lastDomainTime = now
+                            try {
+                                Thread.sleep(20)
+                            } catch (_: Exception) {
+                                break
                             }
                         }
-
-                        if (shouldSkip) continue
-                        val url = "https://$domain"
-
-                        if (!eventQueue.offer(url)) {
-
-                            Log.w(
-                                TAG,
-                                "Queue full. Dropping URL."
-                            )
-                        }
-
-                        Thread.sleep(2) // CPU protection
-
-                    } catch (e: Exception) {
-                        Log.e(TAG, "LOOP ERROR", e)
-                        Thread.sleep(20)
                     }
+
+                } catch (e: Exception) {
+
+                    Log.e(
+                        TAG,
+                        "❌ TUNNEL CRASH",
+                        e
+                    )
+
+                } finally {
+
+                    log(
+                        "🛑 DNS MONITOR STOPPED"
+                    )
                 }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "TUNNEL CRASH", e)
-
-            } finally {
-                log("DNS MONITOR STOPPED")
             }
-        }
 
-        readerThread?.priority = Thread.MIN_PRIORITY
+        readerThread?.priority =
+            Thread.MIN_PRIORITY
+
         readerThread?.start()
     }
-    //-----------------validate domain----------
-    private fun isValidDomain(domain: String): Boolean {
 
-        val blocked = setOf(
-            "in-addr.arpa",
-            "googleapis.com",
-            "gstatic.com",
-            "connectivitycheck",
-            "doubleclick.net"
-        )
+    // =====================================================
+    // VALIDATE DOMAIN
+    // =====================================================
 
-        if (domain.length < 4) return false
+    private fun isValidDomain(
+        domain: String
+    ): Boolean {
 
-        blocked.forEach {
-            if (domain.contains(it)) return false
+        val blocked =
+            setOf(
+                "in-addr.arpa",
+                "googleapis.com",
+                "gstatic.com",
+                "connectivitycheck",
+                "doubleclick.net"
+            )
+
+        if (domain.length < 4) {
+            return false
+        }
+
+        for (blockedDomain in blocked) {
+
+            if (
+                domain.contains(
+                    blockedDomain
+                )
+            ) {
+                return false
+            }
         }
 
         return domain.contains(".")
@@ -318,18 +742,15 @@ class DnsVpnService : VpnService() {
 
         return try {
 
-            val dnsStart =
-                ipHeaderLength + 8
+            val dnsStart = ipHeaderLength + 8
 
             if (dnsStart + 12 >= data.size) {
                 return null
             }
 
-            var position =
-                dnsStart + 12
+            var position = dnsStart + 12
 
-            val domain =
-                StringBuilder()
+            val domain = StringBuilder()
 
             while (position < data.size) {
 
@@ -340,11 +761,26 @@ class DnsVpnService : VpnService() {
                     break
                 }
 
+                /*
+                 * DNS compression pointer.
+                 *
+                 * Do not interpret a compression pointer
+                 * as a normal hostname label.
+                 */
+                if ((len and 0xC0) == 0xC0) {
+                    break
+                }
+
+                /*
+                 * DNS label length must be reasonable.
+                 */
+                if (len > 63) {
+                    return null
+                }
+
                 position++
 
-                if (
-                    position + len >= data.size
-                ) {
+                if (position + len > data.size) {
                     return null
                 }
 
@@ -353,6 +789,9 @@ class DnsVpnService : VpnService() {
                     val c =
                         data[position + i].toInt() and 0xFF
 
+                    /*
+                     * Only keep printable ASCII characters.
+                     */
                     if (c in 32..126) {
                         domain.append(c.toChar())
                     }
@@ -364,11 +803,15 @@ class DnsVpnService : VpnService() {
             }
 
             val result =
-                domain.toString()
+                domain
+                    .toString()
                     .removeSuffix(".")
                     .lowercase()
 
-            // garbage filters
+            // =================================================
+            // VALIDATION
+            // =================================================
+
             if (result.length < 4) {
                 return null
             }
@@ -383,12 +826,17 @@ class DnsVpnService : VpnService() {
 
             result
 
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+
+            Log.e(
+                TAG,
+                "❌ DNS PARSER ERROR",
+                e
+            )
 
             null
         }
     }
-
     // =====================================================
     // FOREGROUND
     // =====================================================
@@ -402,7 +850,7 @@ class DnsVpnService : VpnService() {
 
         val channel =
             NotificationChannel(
-                    CHANNEL_ID,
+                CHANNEL_ID,
                 "Child Internet Protection",
                 NotificationManager.IMPORTANCE_LOW
             )
@@ -414,12 +862,15 @@ class DnsVpnService : VpnService() {
             channel
         )
 
-        val notification: Notification =
+        val notification:
+                Notification =
             NotificationCompat.Builder(
                 this,
                 CHANNEL_ID
             )
-                .setSmallIcon(R.drawable.ic_vpn)
+                .setSmallIcon(
+                    R.drawable.ic_vpn
+                )
                 .setContentTitle(
                     "Child Protection Active"
                 )
@@ -439,106 +890,174 @@ class DnsVpnService : VpnService() {
     }
 
     // =====================================================
-    // CHILD ID
-    // =====================================================
-
-    private fun getChildId(): String {
-
-        val prefs =
-            getSharedPreferences(
-                "child_prefs",
-                MODE_PRIVATE
-            )
-
-        return prefs.getString(
-            "child_id",
-            ""
-        ) ?: ""
-    }
-
-    // =====================================================
     // CLEANUP
     // =====================================================
 
     private fun cleanup() {
 
+        Log.e(
+            TAG,
+            "🧹 VPN CLEANUP"
+        )
+
         isRunning = false
-        workerRunning = false
-        watchdogRunning = false
+
         isStarting = false
 
+        workerRunning = false
+
+        watchdogRunning = false
+
+        // =================================================
+        // STOP WATCHDOG
+        // =================================================
+
         try {
+
+            watchdogHandler
+                .removeCallbacksAndMessages(
+                    null
+                )
+
+        } catch (_: Exception) {}
+
+        // =================================================
+        // STOP HANDLER
+        // =================================================
+
+        try {
+
+            handler
+                .removeCallbacksAndMessages(
+                    null
+                )
+
+        } catch (_: Exception) {}
+
+        // =================================================
+        // STOP READER
+        // =================================================
+
+        try {
+
             readerThread?.interrupt()
-            readerThread = null
+
         } catch (_: Exception) {}
 
+        readerThread = null
+
+        // =================================================
+        // STOP WORKER
+        // =================================================
+
         try {
+
             workerThread?.interrupt()
-            workerThread = null
+
         } catch (_: Exception) {}
 
+        workerThread = null
+
+        // =================================================
+        // CLOSE VPN
+        // =================================================
+
         try {
+
             vpnInterface?.close()
-            vpnInterface = null
+
         } catch (_: Exception) {}
+
+        vpnInterface = null
+
+        /*
+         * Do not clear the event queue here.
+         *
+         * Keeping queued events allows the next worker
+         * instance to process them if the service recovers.
+         */
     }
 
     // =====================================================
     // TASK REMOVED
     // =====================================================
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
+    override fun onTaskRemoved(
+        rootIntent: Intent?
+    ) {
 
-        log("⚠ Task removed")
+        /*
+         * IMPORTANT:
+         *
+         * Removing the app from Recents must NOT destroy
+         * the VPN protection service.
+         *
+         * The manifest already has:
+         *
+         * stopWithTask="false"
+         *
+         * Therefore we simply leave the service running.
+         */
 
-        handler.removeCallbacksAndMessages(null)
+        log(
+            "⚠ Task removed - VPN service remains active"
+        )
 
-        cleanup()
-
-        stopSelf()
-
-        super.onTaskRemoved(rootIntent)
+        super.onTaskRemoved(
+            rootIntent
+        )
     }
-
-    // =====================================================
-    // REVOKE
-    // =====================================================
-
 
     // =====================================================
     // DESTROY
     // =====================================================
 
     override fun onDestroy() {
-        super.onDestroy()
 
-        isRunning = false
-
-        browsingTracker?.destroy()
-        browsingTracker = null
-
-        log("💀 VPN destroyed")
+        Log.e(
+            TAG,
+            "💀 VPN onDestroy"
+        )
 
         cleanup()
+
+        super.onDestroy()
     }
+
     // =====================================================
     // LOW MEMORY
     // =====================================================
 
     override fun onLowMemory() {
-        super.onLowMemory()
 
-        log("⚠ LOW MEMORY")
+        Log.e(
+            TAG,
+            "⚠️ SYSTEM LOW MEMORY"
+        )
+
+        Log.e(
+            TAG,
+            "⚠️ DnsVpnService may be under memory pressure"
+        )
+
+        super.onLowMemory()
     }
 
     // =====================================================
     // TRIM MEMORY
     // =====================================================
 
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
+    override fun onTrimMemory(
+        level: Int
+    ) {
 
-        log("⚠ Trim memory = $level")
+        super.onTrimMemory(
+            level
+        )
+
+        log(
+            "⚠ Trim memory = $level"
+        )
     }
 
     // =====================================================
@@ -549,107 +1068,205 @@ class DnsVpnService : VpnService() {
         intent: Intent?
     ): IBinder? {
 
-        return super.onBind(intent)
+        return super.onBind(
+            intent
+        )
     }
 
     // =====================================================
-    // LOGGER
+    // WATCHDOG
     // =====================================================
-
-    private fun log(message: String) {
-
-        if (DEBUG) {
-            Log.e(TAG, message)
-        }
-    }
 
     private fun startWatchdog() {
 
-        if (watchdogRunning) return
+        if (watchdogRunning) {
+            return
+        }
+
         watchdogRunning = true
 
-        watchdogHandler.post(object : Runnable {
-            override fun run() {
+        watchdogHandler.post(
+            object : Runnable {
 
-                if (!isRunning) return
+                override fun run() {
 
-                val dead = System.currentTimeMillis() - lastHeartbeat > 120000
+                    if (!watchdogRunning) {
+                        return
+                    }
 
-                if (dead) {
-                    Log.e(TAG, "VPN STUCK → SAFE RESTART")
+                    if (!isRunning) {
+                        return
+                    }
 
-                    cleanup()
-                    stopSelf()
-                    return
+                    val heartbeatAge =
+                        System.currentTimeMillis() -
+                                lastHeartbeat
+
+                    val dead =
+                        heartbeatAge >
+                                WATCHDOG_TIMEOUT
+
+                    if (dead) {
+
+                        Log.e(
+                            TAG,
+                            "⚠ VPN STUCK → SAFE RESTART"
+                        )
+
+                        /*
+                         * Let the service lifecycle and
+                         * centralized boot/self-healing
+                         * architecture handle recovery.
+                         */
+
+                        cleanup()
+
+                        stopSelf()
+
+                        return
+                    }
+
+                    watchdogHandler.postDelayed(
+                        this,
+                        WATCHDOG_INTERVAL
+                    )
                 }
-
-                watchdogHandler.postDelayed(this, 10000)
             }
-        })
+        )
     }
 
-    //----------------event worker-------
-    private var workerRunning = true
+    // =====================================================
+    // EVENT WORKER
+    // =====================================================
 
     private fun startEventWorker() {
 
         workerThread?.interrupt()
+
         workerRunning = true
 
-        workerThread = Thread {
+        workerThread =
+            Thread {
 
-            while (workerRunning && isRunning) {
+                Log.e(
+                    TAG,
+                    "📡 VPN EVENT WORKER STARTED"
+                )
 
-                try {
+                while (
+                    workerRunning &&
+                    isRunning &&
+                    !Thread.currentThread()
+                        .isInterrupted
+                ) {
 
-                    val url = eventQueue.take()
+                    try {
 
-                    handler.post {
-                        try {
-                            try {
+                        val url =
+                            eventQueue.take()
 
-                                browsingTracker?.onUrlDetected(
-                                    url,
+                        /*
+                         * Send the URL to the existing
+                         * BrowserAccessibilityService /
+                         * BrowsingTracker pipeline.
+                         *
+                         * This prevents DnsVpnService from
+                         * creating a second BrowsingTracker.
+                         */
+
+                        val broadcast =
+                            Intent(
+                                URL_BROADCAST
+                            ).apply {
+
+                                setPackage(
+                                    packageName
+                                )
+
+                                putExtra(
+                                    "url",
+                                    url
+                                )
+
+                                putExtra(
+                                    "package",
                                     "vpn"
                                 )
-
-                            } catch (e: Exception) {
-
-                                Log.e(
-                                    TAG,
-                                    "BrowsingTracker crash",
-                                    e
-                                )
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "TRACKER ERROR", e)
-                        }
+
+                        sendBroadcast(
+                            broadcast
+                        )
+
+                        log(
+                            "📡 URL_DETECTED → $url"
+                        )
+
+                    } catch (
+                        e: InterruptedException
+                    ) {
+
+                        Log.d(
+                            TAG,
+                            "📡 VPN EVENT WORKER STOPPED"
+                        )
+
+                        break
+
+                    } catch (e: Exception) {
+
+                        Log.e(
+                            TAG,
+                            "❌ VPN EVENT WORKER ERROR",
+                            e
+                        )
                     }
-
-                } catch (e: InterruptedException) {
-
-                    Log.d(TAG, "Worker stopped")
-                    break
-
-                } catch (e: Exception) {
-
-                    Log.e(TAG, "WORKER ERROR", e)
                 }
+
+                Log.e(
+                    TAG,
+                    "📡 VPN EVENT WORKER EXITED"
+                )
             }
-        }
+
+        workerThread?.priority =
+            Thread.MIN_PRIORITY
 
         workerThread?.start()
     }
+
+    // =====================================================
+    // VPN REVOKED
+    // =====================================================
+
     override fun onRevoke() {
 
-        Log.e(TAG, "⚠ VPN permission revoked")
-
-        isRunning = false
+        Log.e(
+            TAG,
+            "⚠ VPN PERMISSION REVOKED"
+        )
 
         cleanup()
 
         stopSelf()
 
         super.onRevoke()
+    }
+
+    // =====================================================
+    // LOGGER
+    // =====================================================
+
+    private fun log(
+        message: String
+    ) {
+
+        if (DEBUG) {
+
+            Log.e(
+                TAG,
+                message
+            )
+        }
     }
 }
